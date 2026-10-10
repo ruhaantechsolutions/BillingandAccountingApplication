@@ -30,8 +30,8 @@ RBiz.sln
 ├── Directory.Packages.props         every NuGet version, in one place
 └── src/
     ├── RBiz.Domain/
-    │   ├── Common/AuditableEntity.cs
-    │   ├── Entities/                Tenant, User, AuditLog
+    │   ├── Common/                  AuditableEntity, INonAuditable
+    │   ├── Entities/                Tenant, User, AuditLog, RefreshToken
     │   ├── Exceptions/              Domain, NotFound, Validation, Conflict
     │   └── Sync/                    ISyncable, SyncableEntity, SyncOperation
     ├── RBiz.Application/
@@ -43,7 +43,7 @@ RBiz.sln
     │   ├── Sync/                    offline-sync engine, cursor, contracts, DTOs
     │   └── DependencyInjection.cs
     ├── RBiz.Infrastructure/
-    │   ├── Authentication/          JwtSettings, JwtTokenGenerator, PasswordHasher
+    │   ├── Authentication/          JWT, password + secure-token hashing, lifetimes
     │   ├── Persistence/
     │   │   ├── AppDbContext.cs      audit columns, audit trail, soft-delete interception
     │   │   ├── AppDbContextFactory.cs
@@ -301,11 +301,54 @@ the rows that reference it.
 - Generate ids client-side as **UUID v7** to match the server's keys — time-ordered, so
   they do not fragment the clustered index.
 
-### Known gap
+### Refresh tokens
 
-An access token lives 60–120 minutes. A PWA offline for longer returns with an expired
-token and cannot push its queued changes. A refresh-token flow is needed before relying
-on long offline periods; it is not implemented here.
+An access token lives 60–120 minutes, so a device offline all day would return with a
+dead token and no way to upload the work queued on it. Login therefore also issues a
+**refresh token**, valid for `Jwt:RefreshTokenDays` (30 by default), which bounds how
+long a device may stay offline and still recover.
+
+```http
+POST /api/v1/auth/login     → accessToken + refreshToken
+POST /api/v1/auth/refresh   → a NEW accessToken and a NEW refreshToken
+POST /api/v1/auth/logout    → 204, revokes the whole family
+```
+
+`refresh` and `logout` are anonymous by necessity: the access token is expired by
+definition at the point a client needs to refresh it.
+
+How the token is protected:
+
+- **Stored hashed.** Only the SHA-256 of the token is persisted, so a leaked database
+  cannot be replayed against the API. A plain hash is correct here, unlike for a
+  password: the token is 256 bits of cryptographic randomness, so there is no dictionary
+  to attack, and a deliberately slow hash would be paid on every reconnect for nothing.
+- **Rotated on every use.** Each refresh issues a new token and spends the old one, so a
+  captured token is useful only until the real client next reconnects.
+- **Replay revokes the family.** Presenting an already-rotated token means a copy leaked,
+  and the server cannot tell the attacker from the victim — so every token descended from
+  that login is revoked and the user must sign in again.
+- **Bound to a device.** The token carries the same `deviceId` used for sync, so a token
+  lifted from one device will not work from another.
+- **Never audited, never synchronised.** `RefreshToken` implements `INonAuditable`, so the
+  hash is never copied into the append-only audit trail, and it does not derive from
+  `SyncableEntity`, so it can never be replicated to a device.
+- **Re-checks the account.** A user disabled or deleted while the device was offline
+  cannot be revived by a refresh.
+
+Every failure returns the same message regardless of cause — unknown, expired, revoked or
+wrong device — so the endpoint cannot be used to probe which tokens exist. The real reason
+goes to the log.
+
+**The client must serialise refreshes.** Because a replayed token revokes the family, an
+Angular app with several tabs has to funnel refreshes through one shared call (a single
+`shareReplay`-ed observable in an interceptor). Two concurrent refreshes will sign the
+user out. That strictness is deliberate: the alternative is a grace window in which a
+stolen token keeps working.
+
+Note also that each rotation extends the window, so an actively used device stays signed
+in indefinitely. If sessions must die on a fixed schedule, carry an absolute expiry
+forward from the family's first token instead.
 
 ### Caveat
 

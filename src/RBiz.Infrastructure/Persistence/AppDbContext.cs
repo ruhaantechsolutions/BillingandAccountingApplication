@@ -20,8 +20,15 @@ public sealed class AppDbContext : DbContext, IUnitOfWork
     /// an audit row would be a second copy of the credential in a table that is, by
     /// design, widely readable and never deleted.
     /// </summary>
-    private static readonly HashSet<string> RedactedProperties =
-        new(StringComparer.OrdinalIgnoreCase) { nameof(User.PasswordHash) };
+    private static readonly HashSet<string> RedactedProperties = new(StringComparer.OrdinalIgnoreCase)
+    {
+        nameof(User.PasswordHash),
+
+        // Redundant, because RefreshToken is INonAuditable and skipped wholesale below.
+        // Kept so that a future entity holding a column of this name cannot leak it by
+        // forgetting the marker interface.
+        nameof(RefreshToken.TokenHash)
+    };
 
     private readonly ICurrentUser _currentUser;
     private readonly TimeProvider _timeProvider;
@@ -41,6 +48,11 @@ public sealed class AppDbContext : DbContext, IUnitOfWork
     public DbSet<User> Users => Set<User>();
 
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
+
+    /// <summary>
+    /// Refresh tokens. Hashed, never audited, never synchronised - see RefreshToken.
+    /// </summary>
+    public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
 
     /// <summary>Ledger of client sync operations already applied. See SyncOperation.</summary>
     public DbSet<SyncOperation> SyncOperations => Set<SyncOperation>();
@@ -154,8 +166,9 @@ public sealed class AppDbContext : DbContext, IUnitOfWork
 
         foreach (var entry in ChangeTracker.Entries())
         {
-            // Never audit the audit trail, and ignore entities that are merely loaded.
-            if (entry.Entity is AuditLog ||
+            // Never audit the audit trail itself, never audit a credential table (see
+            // INonAuditable), and ignore entities that are merely loaded.
+            if (entry.Entity is AuditLog or INonAuditable ||
                 entry.State is EntityState.Detached or EntityState.Unchanged)
             {
                 continue;

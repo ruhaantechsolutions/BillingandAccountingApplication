@@ -78,6 +78,7 @@ public static class DependencyInjection
         services.AddScoped<ITenantRepository, TenantRepository>();
         services.AddScoped<IUserRepository, UserRepository>();
         services.AddScoped<IAuditLogRepository, AuditLogRepository>();
+        services.AddScoped<IRefreshTokenRepository, RefreshTokenRepository>();
 
         services.AddScoped<DatabaseSeeder>();
 
@@ -98,6 +99,11 @@ public static class DependencyInjection
         // Stateless and thread-safe, so a single instance serves every request.
         services.AddSingleton<IPasswordHasher, PasswordHasher>();
         services.AddSingleton<IJwtTokenGenerator, JwtTokenGenerator>();
+        services.AddSingleton<ISecureTokenFactory, SecureTokenFactory>();
+
+        // Adapts the configured day count to the TimeSpan the Application layer asks for,
+        // so that layer never has to know the setting exists.
+        services.AddSingleton<IRefreshTokenLifetime, ConfiguredRefreshTokenLifetime>();
 
         return services;
     }

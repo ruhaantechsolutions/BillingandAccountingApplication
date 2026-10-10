@@ -30,4 +30,15 @@ public sealed class JwtSettings
 
     [Range(1, 1440)]
     public int ExpiryMinutes { get; init; } = 60;
+
+    /// <summary>
+    /// How many days a refresh token remains valid.
+    ///
+    /// This is the ceiling on how long a device may stay offline and still upload its
+    /// queued work: once it lapses the user must sign in again, which an offline device
+    /// cannot do. Thirty days suits a field device that may go a few weeks between
+    /// connections; shorten it if sessions should die sooner.
+    /// </summary>
+    [Range(1, 365)]
+    public int RefreshTokenDays { get; init; } = 30;
 }
