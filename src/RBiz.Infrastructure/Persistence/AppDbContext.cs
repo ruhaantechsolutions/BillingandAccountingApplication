@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore.ChangeTracking;
 using RBiz.Application.Interfaces;
 using RBiz.Domain.Common;
 using RBiz.Domain.Entities;
+using RBiz.Domain.Sync;
 
 namespace RBiz.Infrastructure.Persistence;
 
@@ -41,6 +42,9 @@ public sealed class AppDbContext : DbContext, IUnitOfWork
 
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
 
+    /// <summary>Ledger of client sync operations already applied. See SyncOperation.</summary>
+    public DbSet<SyncOperation> SyncOperations => Set<SyncOperation>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         // Picks up every IEntityTypeConfiguration in this assembly, so a new entity only
@@ -55,6 +59,10 @@ public sealed class AppDbContext : DbContext, IUnitOfWork
         var nowUtc = _timeProvider.GetUtcNow().UtcDateTime;
         var userId = _currentUser.UserId;
 
+        // Runs first: it rewrites deletes into updates, and everything below should see
+        // the rewritten state.
+        ConvertDeletesToSoftDeletes(nowUtc, userId);
+
         StampAuditableEntities(nowUtc, userId);
 
         // Built before saving, while the change tracker still knows the original values.
@@ -68,6 +76,45 @@ public sealed class AppDbContext : DbContext, IUnitOfWork
         // One round trip commits the business change and its audit rows together, so the
         // trail can never disagree with the data.
         return base.SaveChangesAsync(cancellationToken);
+    }
+
+    /// <summary>
+    /// Turns a delete of a synchronisable entity into an update that sets the tombstone
+    /// columns.
+    ///
+    /// This is what lets an offline client find out that a row is gone. A hard delete
+    /// would simply stop appearing in the delta, leaving every disconnected device with a
+    /// stale copy it can never reconcile. For accounting records, keeping the row is also
+    /// the behaviour an auditor expects.
+    /// </summary>
+    private void ConvertDeletesToSoftDeletes(DateTime nowUtc, Guid? userId)
+    {
+        foreach (var entry in ChangeTracker.Entries<SyncableEntity>())
+        {
+            if (entry.State is not EntityState.Deleted)
+            {
+                continue;
+            }
+
+            entry.State = EntityState.Modified;
+
+            entry.Entity.IsDeleted = true;
+            entry.Entity.DeletedAtUtc = nowUtc;
+            entry.Entity.DeletedBy = userId;
+
+            // Only the tombstone columns are written; the rest of the row is preserved
+            // exactly as it was so the audit trail and the client both see the real
+            // historical values.
+            foreach (var property in entry.Properties)
+            {
+                var name = property.Metadata.Name;
+
+                property.IsModified = name
+                    is nameof(SyncableEntity.IsDeleted)
+                    or nameof(SyncableEntity.DeletedAtUtc)
+                    or nameof(SyncableEntity.DeletedBy);
+            }
+        }
     }
 
     /// <summary>
@@ -118,6 +165,12 @@ public sealed class AppDbContext : DbContext, IUnitOfWork
             {
                 EntityState.Added => AuditAction.Created,
                 EntityState.Deleted => AuditAction.Deleted,
+
+                // A soft delete reaches here as a Modified entry, because
+                // ConvertDeletesToSoftDeletes rewrote it. The audit trail should still
+                // call it a deletion rather than an edit of a flag.
+                EntityState.Modified when IsBecomingSoftDeleted(entry) => AuditAction.Deleted,
+
                 _ => AuditAction.Updated
             };
 
@@ -137,6 +190,24 @@ public sealed class AppDbContext : DbContext, IUnitOfWork
         }
 
         return logs;
+    }
+
+    /// <summary>
+    /// True when this save is what sets the entity's tombstone, as opposed to an ordinary
+    /// edit of a row that was already deleted.
+    /// </summary>
+    private static bool IsBecomingSoftDeleted(EntityEntry entry)
+    {
+        if (entry.Entity is not SyncableEntity)
+        {
+            return false;
+        }
+
+        var isDeleted = entry.Property(nameof(SyncableEntity.IsDeleted));
+
+        return isDeleted.IsModified
+               && isDeleted.CurrentValue is true
+               && isDeleted.OriginalValue is not true;
     }
 
     /// <summary>

@@ -32,28 +32,31 @@ RBiz.sln
     ├── RBiz.Domain/
     │   ├── Common/AuditableEntity.cs
     │   ├── Entities/                Tenant, User, AuditLog
-    │   └── Exceptions/              Domain, NotFound, Validation, Conflict
+    │   ├── Exceptions/              Domain, NotFound, Validation, Conflict
+    │   └── Sync/                    ISyncable, SyncableEntity, SyncOperation
     ├── RBiz.Application/
     │   ├── Common/                  paging, claim names
     │   ├── Dtos/
     │   ├── Interfaces/              services + repository contracts
     │   ├── Mapping/
     │   ├── Services/
+    │   ├── Sync/                    offline-sync engine, cursor, contracts, DTOs
     │   └── DependencyInjection.cs
     ├── RBiz.Infrastructure/
     │   ├── Authentication/          JwtSettings, JwtTokenGenerator, PasswordHasher
     │   ├── Persistence/
-    │   │   ├── AppDbContext.cs      also stamps audit columns + writes the audit trail
+    │   │   ├── AppDbContext.cs      audit columns, audit trail, soft-delete interception
     │   │   ├── AppDbContextFactory.cs
     │   │   ├── Configurations/
     │   │   ├── Migrations/
-    │   │   └── Repositories/
+    │   │   ├── Repositories/
+    │   │   └── Sync/                providers, registry, store, delta query
     │   └── DependencyInjection.cs
     └── RBiz.WebAPI/
         ├── Authentication/CurrentUser.cs
-        ├── Controllers/
+        ├── Controllers/             includes SyncController
         ├── Errors/GlobalExceptionHandler.cs
-        ├── Extensions/              Serilog, versioning, Swagger, auth, startup
+        ├── Extensions/              Serilog, versioning, Swagger, auth, CORS, startup
         └── Program.cs
 ```
 
@@ -201,3 +204,111 @@ redacted. There is no write path to `AuditLogs` through the API by design.
   index fragmentation random GUIDs cause in SQL Server.
 - List endpoints are paged (default 20, maximum 100), so no query can return an unbounded
   number of rows.
+
+## PWA and offline synchronisation
+
+The API carries the server half of offline sync. The Angular PWA consumes it; nothing
+here assumes a particular client. Everything for this feature lives in a `Sync` folder
+in each layer, so it can be found or changed as one unit.
+
+### Why it is built this way
+
+Offline sync is easy to get almost right and silently lose data. Four specific failure
+modes are handled deliberately:
+
+**"What changed since I last synced?"** Timestamps are the obvious answer and the wrong
+one: clock skew, two rows in the same millisecond, and rows becoming visible after you
+have read past their timestamp all cause silently skipped records. The change marker is
+a SQL Server **`rowversion`** — an 8-byte counter the engine assigns, strictly increasing
+database-wide, which doubles as the concurrency token.
+
+**The missed-change race.** `rowversion` alone is still unsafe: a transaction that starts
+early but commits late writes a low row version that appears *after* a client has synced
+past it, and that change is then lost forever. Every delta is therefore capped at
+**`MIN_ACTIVE_ROWVERSION()`**, the lowest row version still in flight, so no committed
+change can appear below a cursor a client already holds.
+
+**Deletes are invisible to an offline client.** A hard-deleted row simply stops appearing
+in the delta, leaving every disconnected device with a stale copy. Deletes are therefore
+soft: `AppDbContext` converts a `Remove()` into a tombstone, which ships in the next
+delta. A global query filter keeps tombstones out of ordinary queries; the delta
+deliberately bypasses it with `IgnoreQueryFilters`.
+
+**Retries must not double-apply.** A device on a weak connection retries a push it never
+saw acknowledged. Each change carries a client `operationId`, recorded in the
+`SyncOperations` ledger in the same transaction as the change, so a replay is recognised
+and reported as `Duplicate` rather than applied twice.
+
+### Conflict handling
+
+Server-authoritative, never last-write-wins — silently overwriting a financial record is
+not an acceptable default. A client sends the `baseRowVersion` it last saw; if the
+server's differs, the item comes back as `Conflict` with the server's current row
+attached, and nothing is overwritten. The client decides what to do.
+
+Conflicts are returned as data, not exceptions, so one contested row does not stop a
+device from draining the rest of its outbox.
+
+### Endpoints
+
+```http
+GET  /api/v1/sync/status
+     → server time, synchronisable entity names, current limits
+
+GET  /api/v1/sync/changes?cursor={opaque}&entities=users&limit=200
+     → { entities: [ { entity, changes[], nextCursor, hasMore } ], serverTimeUtc }
+
+POST /api/v1/sync/push
+     → { results: [ { operationId, status, message, serverRow } ], serverTimeUtc }
+```
+
+The client loop: `status` to confirm it is genuinely online, `changes` repeatedly while
+`hasMore` is true, then `push` to drain the outbox. Omit the cursor for a first full
+download. Each entity carries its own cursor so a large backlog in one does not hold up
+another.
+
+Paging is keyset on the row version — no `OFFSET`, so the thousandth page costs the same
+as the first and is served straight off the `(IsDeleted, RowVersion)` index.
+
+### Adding an entity to sync
+
+When Billing or Stock arrives, three steps and nothing in the sync engine changes:
+
+1. Derive the entity from `SyncableEntity`.
+2. Call `builder.ConfigureSyncable()` in its EF configuration — one line that adds the row
+   version, tombstone columns, delta index and soft-delete filter together, so none can
+   be forgotten.
+3. Add a provider deriving from `SyncEntityProviderBase<T>` and register it in
+   `AddOfflineSync`. A provider only declares its name, tenant scoping, what a client may
+   read, and what a client may write.
+
+Registration order is the order a client receives entities, so register a parent before
+the rows that reference it.
+
+### Angular client notes
+
+- **CORS** is configured from `Cors:AllowedOrigins`, preset to `localhost:4200` in
+  Development. It **fails closed**: an empty list means no cross-origin access, because a
+  wildcard would expose the API to any site the user has open. Credentials are not
+  allowed and should not be — authentication is a bearer header, not a cookie.
+- `api-supported-versions` and `api-deprecated-versions` are exposed, so the client can
+  detect it is calling a deprecated version. Angular's `HttpClient` cannot read a
+  response header the server does not list.
+- `serverTimeUtc` is on every sync response. Do not trust an offline device's clock for
+  ordering or expiry; use the offset against this value.
+- `navigator.onLine` only reports that a network interface exists. Use
+  `GET /sync/status` to decide whether this API is actually reachable.
+- Generate ids client-side as **UUID v7** to match the server's keys — time-ordered, so
+  they do not fragment the clustered index.
+
+### Known gap
+
+An access token lives 60–120 minutes. A PWA offline for longer returns with an expired
+token and cannot push its queued changes. A refresh-token flow is needed before relying
+on long offline periods; it is not implemented here.
+
+### Caveat
+
+`rowversion` and `MIN_ACTIVE_ROWVERSION()` are SQL Server features. Moving to PostgreSQL
+would mean replacing the change marker with a sequence-backed column — the provider
+abstraction is the only place that would change.

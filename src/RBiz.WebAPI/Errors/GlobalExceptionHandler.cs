@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using RBiz.Domain.Exceptions;
 
 namespace RBiz.WebAPI.Errors;
@@ -86,6 +87,17 @@ internal sealed class GlobalExceptionHandler : IExceptionHandler
                 Status = StatusCodes.Status409Conflict,
                 Title = "Request conflicts with existing data",
                 Detail = conflict.Message
+            },
+
+            // Adding a rowversion for offline sync turned on optimistic concurrency for
+            // every update, so a genuine race now surfaces here instead of silently
+            // overwriting the other write. The caller should re-read and retry.
+            DbUpdateConcurrencyException => new ProblemDetails
+            {
+                Status = StatusCodes.Status409Conflict,
+                Title = "Record was changed by someone else",
+                Detail = "This record was changed by another user while you were editing it. " +
+                         "Reload it and apply your change again."
             },
 
             // Thrown when a service needs a tenant but the request carried no valid token.

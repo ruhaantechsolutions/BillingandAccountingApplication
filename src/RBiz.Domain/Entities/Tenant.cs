@@ -1,4 +1,4 @@
-using RBiz.Domain.Common;
+using RBiz.Domain.Sync;
 
 namespace RBiz.Domain.Entities;
 
@@ -6,10 +6,8 @@ namespace RBiz.Domain.Entities;
 /// An isolated customer of the system. Every user and every audit record belongs to
 /// exactly one tenant, which is how data is kept separate between businesses.
 /// </summary>
-public class Tenant : AuditableEntity
+public class Tenant : SyncableEntity
 {
-    public Guid Id { get; set; }
-
     /// <summary>Display name of the business, e.g. "Ruhaan Tech Solutions".</summary>
     public string Name { get; set; } = string.Empty;
 

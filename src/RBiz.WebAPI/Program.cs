@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Mvc;
 using RBiz.Application;
+using RBiz.Application.Sync;
 using RBiz.Infrastructure;
 using RBiz.WebAPI.Errors;
 using RBiz.WebAPI.Extensions;
@@ -22,6 +23,17 @@ try
         .AddInfrastructure(builder.Configuration);
 
     builder.Services.AddJwtAuthentication(builder.Configuration);
+
+    // --- PWA / offline sync -------------------------------------------------------
+    // Bound here because the host is the only layer that knows where configuration
+    // comes from; SyncOptions itself lives in the Application layer.
+    builder.Services.AddOptions<SyncOptions>()
+        .Bind(builder.Configuration.GetSection(SyncOptions.SectionName))
+        .ValidateDataAnnotations()
+        .ValidateOnStart();
+
+    builder.Services.AddPwaCors(builder.Configuration);
+    // ------------------------------------------------------------------------------
 
     builder.Services
         .AddApiVersioningConfiguration()
@@ -48,6 +60,10 @@ try
     app.UseStatusCodePages();
 
     app.UseRequestLogging();
+
+    // Before authentication: a rejected preflight never carries credentials, so it must
+    // be answered even for an endpoint that requires a token.
+    app.UseCors(CorsExtensions.PolicyName);
 
     if (app.Environment.IsDevelopment())
     {

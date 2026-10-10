@@ -2,9 +2,11 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using RBiz.Application.Interfaces;
+using RBiz.Application.Sync.Interfaces;
 using RBiz.Infrastructure.Authentication;
 using RBiz.Infrastructure.Persistence;
 using RBiz.Infrastructure.Persistence.Repositories;
+using RBiz.Infrastructure.Persistence.Sync;
 
 namespace RBiz.Infrastructure;
 
@@ -21,10 +23,33 @@ public static class DependencyInjection
     {
         services.AddPersistence(configuration);
         services.AddAuthenticationServices(configuration);
+        services.AddOfflineSync();
 
         // Injected rather than calling DateTime.UtcNow directly, so audit timestamps and
         // token lifetimes can be controlled in a test.
         services.TryAddSingletonTimeProvider();
+
+        return services;
+    }
+
+    /// <summary>
+    /// Offline-synchronisation infrastructure, deliberately in its own method so the
+    /// PWA/offline feature is easy to find, change or remove as a unit.
+    ///
+    /// TO ADD AN ENTITY TO SYNC: write a provider deriving from SyncEntityProviderBase
+    /// and register it below. Nothing else in the sync layer needs to change.
+    /// </summary>
+    private static IServiceCollection AddOfflineSync(this IServiceCollection services)
+    {
+        services.AddScoped<ISyncStore, SyncStore>();
+
+        // Registered against the shared interface so the registry picks them up
+        // automatically. Order here is the order a client receives entities in, so
+        // parents come before the rows that reference them.
+        services.AddScoped<ISyncEntityProvider, TenantSyncProvider>();
+        services.AddScoped<ISyncEntityProvider, UserSyncProvider>();
+
+        services.AddScoped<ISyncEntityRegistry, SyncEntityRegistry>();
 
         return services;
     }

@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 using RBiz.Domain.Entities;
+using RBiz.Infrastructure.Persistence.Sync;
 
 namespace RBiz.Infrastructure.Persistence.Configurations;
 
@@ -10,6 +11,9 @@ internal sealed class UserConfiguration : IEntityTypeConfiguration<User>
     public void Configure(EntityTypeBuilder<User> builder)
     {
         builder.ToTable("Users");
+
+        // Row version, tombstone columns, delta index and soft-delete filter.
+        builder.ConfigureSyncable();
 
         builder.HasKey(u => u.Id);
 

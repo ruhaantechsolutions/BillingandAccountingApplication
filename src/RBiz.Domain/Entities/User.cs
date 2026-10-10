@@ -1,14 +1,12 @@
-using RBiz.Domain.Common;
+using RBiz.Domain.Sync;
 
 namespace RBiz.Domain.Entities;
 
 /// <summary>
 /// A person who can authenticate against the API. Scoped to a single tenant.
 /// </summary>
-public class User : AuditableEntity
+public class User : SyncableEntity
 {
-    public Guid Id { get; set; }
-
     /// <summary>Owning tenant. Part of the uniqueness rule on <see cref="Email"/>.</summary>
     public Guid TenantId { get; set; }
 

@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 using RBiz.Domain.Entities;
+using RBiz.Infrastructure.Persistence.Sync;
 
 namespace RBiz.Infrastructure.Persistence.Configurations;
 
@@ -13,6 +14,9 @@ internal sealed class TenantConfiguration : IEntityTypeConfiguration<Tenant>
     public void Configure(EntityTypeBuilder<Tenant> builder)
     {
         builder.ToTable("Tenants");
+
+        // Row version, tombstone columns, delta index and soft-delete filter.
+        builder.ConfigureSyncable();
 
         builder.HasKey(t => t.Id);
 

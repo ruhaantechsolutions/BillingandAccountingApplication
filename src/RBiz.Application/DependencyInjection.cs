@@ -1,6 +1,8 @@
 using Microsoft.Extensions.DependencyInjection;
 using RBiz.Application.Interfaces;
 using RBiz.Application.Services;
+using RBiz.Application.Sync;
+using RBiz.Application.Sync.Interfaces;
 
 namespace RBiz.Application;
 
@@ -18,6 +20,21 @@ public static class DependencyInjection
         services.AddScoped<ITenantService, TenantService>();
         services.AddScoped<IUserService, UserService>();
         services.AddScoped<IAuditLogService, AuditLogService>();
+
+        services.AddOfflineSync();
+
+        return services;
+    }
+
+    /// <summary>
+    /// Offline-synchronisation services, kept in their own method so the PWA/offline
+    /// feature can be found, changed or removed without touching the rest of the layer.
+    /// </summary>
+    private static IServiceCollection AddOfflineSync(this IServiceCollection services)
+    {
+        // SyncOptions is bound by the host, which is the only layer that knows where
+        // configuration comes from.
+        services.AddScoped<ISyncService, SyncService>();
 
         return services;
     }
