@@ -1,0 +1,25 @@
+## .NET build output
+bin/
+obj/
+[Dd]ebug/
+[Rr]elease/
+artifacts/
+*.user
+*.suo
+.vs/
+.vscode/
+.idea/
+
+## Logs produced by Serilog at runtime
+logs/
+*.log
+
+## Local secrets & environment overrides -- never commit these
+appsettings.Local.json
+appsettings.*.Local.json
+*.env
+.env
+
+## OS noise
+.DS_Store
+Thumbs.db

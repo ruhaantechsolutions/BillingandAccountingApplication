@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    LAYER 2 - APPLICATION
+    Business services plus the interfaces (repositories, token generator, hasher)
+    that Infrastructure implements. References Domain only.
+    The packages below are abstractions only - no EF Core, no ASP.NET Core here.
+  -->
+
+  <ItemGroup>
+    <ProjectReference Include="..\RBiz.Domain\RBiz.Domain.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+  </ItemGroup>
+
+</Project>

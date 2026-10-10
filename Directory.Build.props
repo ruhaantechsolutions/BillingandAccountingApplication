@@ -1,0 +1,28 @@
+<Project>
+
+  <!--
+    Shared build settings for every project in the solution.
+    Keeping them here means a framework or language upgrade is a one-line change.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+
+    <!-- Catch sloppy code at build time rather than in production. -->
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+
+    <!--
+      InvariantGlobalization is deliberately NOT enabled here: Microsoft.Data.SqlClient
+      throws "Globalization Invariant Mode is not supported" when opening a connection,
+      so turning it on breaks every database call. Verified by running the API.
+    -->
+
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <!-- Do not demand an XML doc comment on every public member. -->
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+  </PropertyGroup>
+
+</Project>

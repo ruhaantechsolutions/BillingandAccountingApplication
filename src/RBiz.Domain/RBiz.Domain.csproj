@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    LAYER 1 - DOMAIN
+    Entities and business rules only. Intentionally has NO package and NO project
+    references: nothing in the solution can make this layer depend outward.
+  -->
+
+</Project>
