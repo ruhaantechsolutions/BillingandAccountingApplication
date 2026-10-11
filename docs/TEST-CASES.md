@@ -165,6 +165,19 @@ VER-05 is the point of the whole versioning setup — worth doing once to confir
 | USR-03 | Short password | `"password":"short"` | **400**, `Password` error mentions 8 characters |
 | USR-04 | Email without `@` | `"email":"nope"` | **400** |
 | USR-05 | Update | `PUT $BASE/Users/{id}` `{"fullName":"Senior Clerk","isActive":false}` | **200** |
+| USR-06 | Change email | `PUT $BASE/Users/{id}/email` `{"email":"accounts@ruhaantech.local"}` | **200**, returned upper-case |
+| USR-07 | **Login follows the new address** | log in with the new email | **200** |
+| USR-08 | Old address stops working | log in with the previous email | **400** |
+| USR-09 | Re-submitting the same address | repeat USR-06 unchanged | **200** no-op — *not* 409 against itself |
+| USR-10 | Same address, different casing | `{"email":"Accounts@RuhaanTech.Local"}` | **200** — casing is normalised, not a self-conflict |
+| USR-11 | Address already taken | set it to another user's email | **409** |
+| USR-12 | Invalid address | `{"email":"not-an-email"}` | **400**, `Email` field error |
+| USR-13 | Unknown user | `PUT $BASE/Users/{random guid}/email` | **404** |
+| USR-14 | Email change is audited | after USR-06, check `/AuditLogs` | `action: 2`, old and new address recorded |
+| USR-15 | Sync still refuses email | push `"payload":{"email":"x@y.z"}` | **200**, `status: 3` — online-only field |
+
+USR-09 and USR-10 are the ones that catch a naive uniqueness check: without excluding the
+user from their own clash test, both would wrongly return 409.
 | PAGE-01 | Defaults | `GET $BASE/Users` | `pageSize` = **20**, `page` = **1** |
 | PAGE-02 | Capped | `GET $BASE/Users?pageSize=5000` | `pageSize` = **100** |
 | PAGE-03 | Negative ignored | `GET $BASE/Users?page=-5&pageSize=-1` | `page` = 1, `pageSize` = 20 |

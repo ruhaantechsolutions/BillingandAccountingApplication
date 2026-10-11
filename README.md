@@ -282,6 +282,11 @@ When Billing or Stock arrives, three steps and nothing in the sync engine change
    `AddOfflineSync`. A provider only declares its name, tenant scoping, what a client may
    read, and what a client may write.
 
+Email is the exception that proves the rule: it is the login identity, so it has its own
+endpoint, `PUT /api/v1/Users/{id}/email`, and is **online only** — uniqueness within a
+tenant cannot be settled on a disconnected device. Sync rejects it like any other
+non-writable field.
+
 A provider's `WritableFields` set is the whole of its write surface. A payload carrying
 anything outside it is **rejected**, never ignored: silently dropping an unrecognised
 field would tell a device its change was applied when it was discarded, and the device

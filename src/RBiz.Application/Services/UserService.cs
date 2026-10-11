@@ -73,7 +73,7 @@ public sealed class UserService : IUserService
     {
         var tenantId = _currentUser.GetRequiredTenantId();
 
-        var email = request.Email?.Trim().ToUpperInvariant() ?? string.Empty;
+        var email = NormaliseEmail(request.Email);
         var fullName = request.FullName?.Trim() ?? string.Empty;
         var password = request.Password ?? string.Empty;
 
@@ -100,7 +100,7 @@ public sealed class UserService : IUserService
             throw new ValidationException(errors);
         }
 
-        if (await _users.EmailExistsAsync(tenantId, email, cancellationToken))
+        if (await _users.EmailExistsAsync(tenantId, email, cancellationToken: cancellationToken))
         {
             throw new ConflictException($"A user with email '{email}' already exists in this tenant.");
         }
@@ -149,4 +149,59 @@ public sealed class UserService : IUserService
 
         return user.ToDto();
     }
+
+    public async Task<UserDto> UpdateEmailAsync(
+        Guid id,
+        UpdateUserEmailDto request,
+        CancellationToken cancellationToken = default)
+    {
+        var tenantId = _currentUser.GetRequiredTenantId();
+
+        var user = await _users.GetByIdAsync(id, tenantId, cancellationToken)
+            ?? throw new NotFoundException(nameof(User), id);
+
+        var email = NormaliseEmail(request.Email);
+
+        if (email.Length == 0 || !email.Contains('@'))
+        {
+            throw ValidationException.For(nameof(request.Email), "A valid email address is required.");
+        }
+
+        // Re-submitting the address the user already has is a no-op rather than an error,
+        // so a client retrying a request it never saw acknowledged is not punished for it.
+        if (string.Equals(user.Email, email, StringComparison.Ordinal))
+        {
+            return user.ToDto();
+        }
+
+        // The user is excluded from the clash check. Without that, their own row would
+        // match and a change of casing would be reported as a conflict with themselves.
+        if (await _users.EmailExistsAsync(tenantId, email, id, cancellationToken))
+        {
+            throw new ConflictException($"A user with email '{email}' already exists in this tenant.");
+        }
+
+        var previousEmail = user.Email;
+        user.Email = email;
+
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        // Logged because this changes how someone signs in, which is worth being able to
+        // trace. The audit trail records it as well, through the usual interceptor.
+        _logger.LogInformation(
+            "User {UserId} in tenant {TenantId} changed email from {PreviousEmail} to {NewEmail}.",
+            user.Id,
+            tenantId,
+            previousEmail,
+            email);
+
+        return user.ToDto();
+    }
+
+    /// <summary>
+    /// One normalisation rule for every path that accepts an email: trimmed and upper
+    /// cased, matching how addresses are stored and how login looks them up.
+    /// </summary>
+    private static string NormaliseEmail(string? email) =>
+        email?.Trim().ToUpperInvariant() ?? string.Empty;
 }

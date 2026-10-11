@@ -20,7 +20,21 @@ public interface IUserRepository
 
     Task<int> CountByTenantAsync(Guid tenantId, CancellationToken cancellationToken = default);
 
-    Task<bool> EmailExistsAsync(Guid tenantId, string email, CancellationToken cancellationToken = default);
+    /// <summary>
+    /// True when another user in the tenant already holds this email.
+    /// </summary>
+    /// <param name="tenantId">Tenant to search within.</param>
+    /// <param name="email">Normalised (trimmed, upper-case) address to look for.</param>
+    /// <param name="excludeUserId">
+    /// A user to leave out of the check, used when changing an existing user's email so
+    /// that their own current address does not count as a clash.
+    /// </param>
+    /// <param name="cancellationToken">Cancelled automatically if the client disconnects.</param>
+    Task<bool> EmailExistsAsync(
+        Guid tenantId,
+        string email,
+        Guid? excludeUserId = null,
+        CancellationToken cancellationToken = default);
 
     void Add(User user);
 }

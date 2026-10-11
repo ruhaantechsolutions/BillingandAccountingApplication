@@ -62,9 +62,12 @@ internal sealed class UserRepository : IUserRepository
     public Task<bool> EmailExistsAsync(
         Guid tenantId,
         string email,
+        Guid? excludeUserId = null,
         CancellationToken cancellationToken = default) =>
         _context.Users.AnyAsync(
-            u => u.TenantId == tenantId && u.Email == email,
+            u => u.TenantId == tenantId
+                 && u.Email == email
+                 && (excludeUserId == null || u.Id != excludeUserId),
             cancellationToken);
 
     public void Add(User user) => _context.Users.Add(user);

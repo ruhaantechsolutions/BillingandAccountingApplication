@@ -82,4 +82,34 @@ public sealed class UsersController : ApiControllerBase
 
         return Ok(user);
     }
+
+    /// <summary>
+    /// Changes a user's email address.
+    /// </summary>
+    /// <remarks>
+    /// The email is the login identity, so it has its own endpoint rather than riding
+    /// along with a general update - a display-name edit should not be able to change how
+    /// somebody signs in.
+    ///
+    /// Online only. Uniqueness within the tenant cannot be settled on a disconnected
+    /// device, which is why sync refuses to write this field.
+    ///
+    /// Submitting the address the user already has succeeds and changes nothing.
+    /// </remarks>
+    /// <response code="200">The updated user.</response>
+    /// <response code="404">No such user exists in this tenant.</response>
+    /// <response code="409">Another user in this tenant already uses that address.</response>
+    [HttpPut("{id:guid}/email")]
+    [ProducesResponseType(StatusCodes.Status200OK, Type = typeof(UserDto))]
+    [ProducesResponseType(StatusCodes.Status404NotFound, Type = typeof(ProblemDetails))]
+    [ProducesResponseType(StatusCodes.Status409Conflict, Type = typeof(ProblemDetails))]
+    public async Task<ActionResult<UserDto>> UpdateEmail(
+        Guid id,
+        [FromBody] UpdateUserEmailDto request,
+        CancellationToken cancellationToken)
+    {
+        var user = await _userService.UpdateEmailAsync(id, request, cancellationToken);
+
+        return Ok(user);
+    }
 }

@@ -17,3 +17,12 @@ public sealed record CreateUserDto(string Email, string FullName, string Passwor
 
 /// <summary>Payload for updating a user.</summary>
 public sealed record UpdateUserDto(string FullName, bool IsActive);
+
+/// <summary>
+/// Payload for changing a user's email.
+///
+/// Separate from <see cref="UpdateUserDto"/> on purpose: the email is the login
+/// identity, so changing it is a different kind of act from editing a display name and
+/// should not be possible as a side effect of a general update.
+/// </summary>
+public sealed record UpdateUserEmailDto(string Email);
