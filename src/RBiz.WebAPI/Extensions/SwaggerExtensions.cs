@@ -35,9 +35,15 @@ internal static class SwaggerExtensions
 
             // Microsoft.OpenApi v2 (which Swashbuckle 10 builds on) references a scheme
             // by id through OpenApiSecuritySchemeReference rather than an inline object.
-            options.AddSecurityRequirement(_ => new OpenApiSecurityRequirement
+            //
+            // The host document MUST be passed to the reference. Without it the reference
+            // cannot resolve the scheme and serialises as an empty object, which reads as
+            // "this operation needs no authentication" - the Authorize button then appears
+            // to work but Swagger UI never attaches the token, and every call comes back
+            // 401. That is why the document is taken from the delegate instead of ignored.
+            options.AddSecurityRequirement(document => new OpenApiSecurityRequirement
             {
-                [new OpenApiSecuritySchemeReference(SecuritySchemeId)] = []
+                [new OpenApiSecuritySchemeReference(SecuritySchemeId, document)] = []
             });
 
             // Includes the XML doc comments from the controllers, so the summaries written
