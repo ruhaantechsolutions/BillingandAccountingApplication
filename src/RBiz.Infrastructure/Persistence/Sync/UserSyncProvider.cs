@@ -16,7 +16,18 @@ internal sealed class UserSyncProvider : SyncEntityProviderBase<User>
     {
     }
 
+    /// <summary>
+    /// A device may correct a display name or deactivate someone. It may NOT change an
+    /// email (that is the login identity, and uniqueness has to be settled server-side)
+    /// and it certainly may not set a password hash. Anything else sent here is rejected
+    /// with a message naming these fields, never quietly dropped.
+    /// </summary>
+    private static readonly HashSet<string> Writable =
+        new(StringComparer.OrdinalIgnoreCase) { "fullName", "isActive" };
+
     public override string EntityName => "users";
+
+    protected override IReadOnlySet<string> WritableFields => Writable;
 
     protected override string TenantPropertyName => nameof(User.TenantId);
 

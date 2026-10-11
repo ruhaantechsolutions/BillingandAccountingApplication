@@ -119,6 +119,9 @@ configuration, never a migration's `HasData`.
 4. **Absolute session expiry** — each rotation currently extends the refresh window, so an
    active device stays signed in indefinitely. Change only if asked.
 5. Sync is read-only for `Tenant`; `User` can be edited but not created over sync.
+6. A sync provider's `WritableFields` is its entire write surface. Unknown payload fields
+   are **rejected**, never ignored, so a device is never told a discarded change was
+   applied. Keep that rule when adding Billing and Stock.
 
 ---
 

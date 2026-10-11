@@ -16,7 +16,16 @@ internal sealed class TenantSyncProvider : SyncEntityProviderBase<Tenant>
     {
     }
 
+    /// <summary>
+    /// Empty: creating or renaming a business is an administrative act that belongs
+    /// online, where the uniqueness of its code can be enforced properly. Any payload
+    /// sent for a tenant is rejected with that explanation.
+    /// </summary>
+    private static readonly HashSet<string> Writable = new(StringComparer.OrdinalIgnoreCase);
+
     public override string EntityName => "tenants";
+
+    protected override IReadOnlySet<string> WritableFields => Writable;
 
     protected override string TenantPropertyName => nameof(Tenant.Id);
 
@@ -36,8 +45,9 @@ internal sealed class TenantSyncProvider : SyncEntityProviderBase<Tenant>
     };
 
     /// <summary>
-    /// Read-only over sync. Creating or renaming a business is an administrative act that
-    /// belongs online, where uniqueness of the code can be enforced properly.
+    /// Unreachable in practice: an empty <see cref="WritableFields"/> means the base class
+    /// rejects every payload before it gets here, and an empty payload is rejected earlier
+    /// still. Kept as a defence so the entity can never become writable by accident.
     /// </summary>
     protected override string? ApplyPayload(Tenant entity, Dictionary<string, object?> payload, bool isNew) =>
         "Tenants are read-only over sync. Use the Tenants endpoints while online.";

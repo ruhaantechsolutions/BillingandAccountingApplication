@@ -41,6 +41,18 @@ internal abstract class SyncEntityProviderBase<TEntity> : ISyncEntityProvider
     /// </summary>
     protected abstract string TenantPropertyName { get; }
 
+    /// <summary>
+    /// Field names a client is allowed to send in a payload for this entity.
+    ///
+    /// Anything outside this set is REJECTED rather than ignored. Silently dropping an
+    /// unrecognised field tells a device its change was applied when it was discarded -
+    /// the worst possible answer for an offline client, which would then clear the item
+    /// from its outbox and lose the edit for good.
+    ///
+    /// An empty set means the entity cannot be changed from a device at all.
+    /// </summary>
+    protected abstract IReadOnlySet<string> WritableFields { get; }
+
     /// <summary>Shapes a row for the client. Must never include a secret.</summary>
     protected abstract object ToPayload(TEntity entity);
 
@@ -132,6 +144,30 @@ internal abstract class SyncEntityProviderBase<TEntity> : ISyncEntityProvider
             return Rejected(item, "id is required.");
         }
 
+        Dictionary<string, object?>? payload = null;
+
+        if (item.ChangeType is SyncChangeType.Upsert)
+        {
+            // Checked before any database work: a payload the server cannot accept is
+            // answered without the cost of a round trip to find the row.
+            if (item.Payload is null || item.Payload.Count == 0)
+            {
+                return Rejected(item, "payload is required for an upsert.");
+            }
+
+            // Re-keyed case-insensitively so "FullName" and "fullName" behave alike.
+            // Without this a client using the wrong casing would hit the unknown-field
+            // rejection below for a field it is genuinely allowed to set.
+            payload = new Dictionary<string, object?>(item.Payload, StringComparer.OrdinalIgnoreCase);
+
+            var unknownFields = ValidateFields(payload);
+
+            if (unknownFields is not null)
+            {
+                return Rejected(item, unknownFields);
+            }
+        }
+
         // Tracked, and tenant-scoped: a client cannot reach another tenant's row even by
         // guessing its id, because the predicate would not match.
         var existing = await ForTenant(Context.Set<TEntity>().IgnoreQueryFilters(), tenantId)
@@ -140,18 +176,43 @@ internal abstract class SyncEntityProviderBase<TEntity> : ISyncEntityProvider
         return item.ChangeType switch
         {
             SyncChangeType.Delete => ApplyDelete(item, existing),
-            SyncChangeType.Upsert => ApplyUpsert(tenantId, item, existing),
+            SyncChangeType.Upsert => ApplyUpsert(tenantId, item, existing, payload!),
             _ => Rejected(item, $"Unsupported change type '{item.ChangeType}'.")
         };
     }
 
-    private SyncPushItemResult ApplyUpsert(Guid tenantId, SyncPushItem item, TEntity? existing)
+    /// <summary>
+    /// Returns a rejection message when the payload carries a field this entity does not
+    /// accept, or null when every field is writable.
+    /// </summary>
+    private string? ValidateFields(Dictionary<string, object?> payload)
     {
-        if (item.Payload is null || item.Payload.Count == 0)
+        var unknown = payload.Keys
+            .Where(key => !WritableFields.Contains(key))
+            .Order(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        if (unknown.Length == 0)
         {
-            return Rejected(item, "payload is required for an upsert.");
+            return null;
         }
 
+        if (WritableFields.Count == 0)
+        {
+            return $"'{EntityName}' is read-only over sync and cannot be changed from a device.";
+        }
+
+        return $"These fields cannot be changed through sync: {string.Join(", ", unknown)}. " +
+               $"Writable fields for '{EntityName}' are: " +
+               $"{string.Join(", ", WritableFields.Order(StringComparer.OrdinalIgnoreCase))}.";
+    }
+
+    private SyncPushItemResult ApplyUpsert(
+        Guid tenantId,
+        SyncPushItem item,
+        TEntity? existing,
+        Dictionary<string, object?> payload)
+    {
         var isNew = existing is null;
 
         if (isNew)
@@ -185,7 +246,7 @@ internal abstract class SyncEntityProviderBase<TEntity> : ISyncEntityProvider
             AssignTenant(entity, tenantId);
         }
 
-        var rejection = ApplyPayload(entity, item.Payload, isNew);
+        var rejection = ApplyPayload(entity, payload, isNew);
 
         if (rejection is not null)
         {

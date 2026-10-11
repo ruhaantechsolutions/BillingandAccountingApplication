@@ -240,9 +240,13 @@ curl -s -H "$AUTH" "$BASE/sync/changes?entities=users" | python3 -m json.tool
 | PUSH-07 | Repeat delete | resend PUSH-06 with a new `operationId` | **200**, `status: 1`, message `Already deleted on the server.` |
 | PUSH-08 | Deleted row hidden from REST | `GET $BASE/Users/{deleted id}` | **404** — the query filter hides tombstones |
 | PUSH-09 | Create over sync refused | `changeType: 1`, random new `id`, `baseRowVersion: null` | **200**, `status: 3` (Rejected), message points at `POST /api/v1/Users` |
-| PUSH-10 | Tenants read-only | `"entity":"tenants"`, `changeType: 1` | **200**, `status: 3` (Rejected) |
+| PUSH-10 | Tenants read-only | `"entity":"tenants"`, `changeType: 1` | **200**, `status: 3`, `'tenants' is read-only over sync...` |
 | PUSH-11 | Unknown entity | `"entity":"invoices"` | **200**, `status: 3` — a per-item rejection, **not** a 400 for the batch |
 | PUSH-12 | Blank field rejected | `"payload":{"fullName":"   "}` | **200**, `status: 3`, `fullName cannot be empty.` |
+| PUSH-12a | **Unknown field rejected, not ignored** | `"payload":{"email":"x@y.z"}` | **200**, `status: 3`, message names `email` and lists the writable fields |
+| PUSH-12b | Several unknown fields | `"payload":{"email":"x@y.z","passwordHash":"p","tenantId":"..."}` | **200**, `status: 3`, all three named |
+| PUSH-12c | Valid + unknown mixed | `"payload":{"fullName":"Valid","email":"x@y.z"}` | **200**, `status: 3` — the valid part is **not** partially applied |
+| PUSH-12d | Field name casing | `"payload":{"FullName":"Works"}` | **200**, `status: 1` — field names are case-insensitive |
 | PUSH-13 | Bad boolean | `"payload":{"isActive":"maybe"}` | **200**, `status: 3` |
 | PUSH-14 | Missing operationId | omit it / send all-zero guid | **200**, `status: 3` |
 | PUSH-15 | Empty batch | `"items":[]` | **400** |

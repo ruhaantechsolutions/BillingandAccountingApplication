@@ -282,6 +282,12 @@ When Billing or Stock arrives, three steps and nothing in the sync engine change
    `AddOfflineSync`. A provider only declares its name, tenant scoping, what a client may
    read, and what a client may write.
 
+A provider's `WritableFields` set is the whole of its write surface. A payload carrying
+anything outside it is **rejected**, never ignored: silently dropping an unrecognised
+field would tell a device its change was applied when it was discarded, and the device
+would then clear that item from its outbox and lose the edit permanently. Field names are
+matched case-insensitively. An empty set makes the entity read-only over sync.
+
 Registration order is the order a client receives entities, so register a parent before
 the rows that reference it.
 
