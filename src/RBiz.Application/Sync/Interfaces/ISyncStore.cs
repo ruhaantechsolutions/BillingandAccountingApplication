@@ -23,7 +23,7 @@ public interface ISyncStore
     /// if this is the first time it has been seen.
     /// </summary>
     Task<SyncOperation?> FindOperationAsync(
-        Guid tenantId,
+        Guid companyId,
         Guid operationId,
         CancellationToken cancellationToken = default);
 
@@ -32,7 +32,7 @@ public interface ISyncStore
     /// change itself, so the ledger can never claim something the data does not show.
     /// </summary>
     void RecordOperation(
-        Guid tenantId,
+        Guid companyId,
         Guid operationId,
         string deviceId,
         string entityName,

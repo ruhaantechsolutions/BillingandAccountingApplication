@@ -5,6 +5,7 @@ using RBiz.Application.Interfaces;
 using RBiz.Application.Mapping;
 using RBiz.Domain.Entities;
 using RBiz.Domain.Exceptions;
+using RBiz.Domain.Utilities;
 
 namespace RBiz.Application.Services;
 
@@ -39,16 +40,16 @@ public sealed class UserService : IUserService
     {
         // The tenant comes from the validated token, never from the request, so a caller
         // cannot read another tenant's users by passing a different id.
-        var tenantId = _currentUser.GetRequiredTenantId();
+        var companyId = _currentUser.GetRequiredCompanyId();
 
-        var total = await _users.CountByTenantAsync(tenantId, cancellationToken);
+        var total = await _users.CountByCompanyAsync(companyId, cancellationToken);
 
         if (total == 0)
         {
             return new PagedResult<UserDto>([], page.Page, page.PageSize, 0);
         }
 
-        var users = await _users.GetByTenantAsync(tenantId, page.Skip, page.PageSize, cancellationToken);
+        var users = await _users.GetByCompanyAsync(companyId, page.Skip, page.PageSize, cancellationToken);
 
         return new PagedResult<UserDto>(
             users.ToDtoList(static u => u.ToDto()),
@@ -59,9 +60,9 @@ public sealed class UserService : IUserService
 
     public async Task<UserDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var tenantId = _currentUser.GetRequiredTenantId();
+        var companyId = _currentUser.GetRequiredCompanyId();
 
-        var user = await _users.GetByIdAsync(id, tenantId, cancellationToken)
+        var user = await _users.GetByIdAsync(id, companyId, cancellationToken)
             ?? throw new NotFoundException(nameof(User), id);
 
         return user.ToDto();
@@ -71,17 +72,18 @@ public sealed class UserService : IUserService
         CreateUserDto request,
         CancellationToken cancellationToken = default)
     {
-        var tenantId = _currentUser.GetRequiredTenantId();
+        var companyId = _currentUser.GetRequiredCompanyId();
 
-        var email = NormaliseEmail(request.Email);
+        var mobile = IndianMobileNumber.Normalise(request.Mobile);
         var fullName = request.FullName?.Trim() ?? string.Empty;
+        var email = string.IsNullOrWhiteSpace(request.Email) ? null : request.Email.Trim().ToUpperInvariant();
         var password = request.Password ?? string.Empty;
 
         var errors = new Dictionary<string, string[]>();
 
-        if (email.Length == 0 || !email.Contains('@'))
+        if (!IndianMobileNumber.IsValid(mobile))
         {
-            errors[nameof(request.Email)] = ["A valid email address is required."];
+            errors[nameof(request.Mobile)] = ["Enter a valid 10-digit mobile number."];
         }
 
         if (fullName.Length == 0)
@@ -95,30 +97,53 @@ public sealed class UserService : IUserService
                 [$"Password must be at least {MinPasswordLength} characters long."];
         }
 
+        if (email is not null && !email.Contains('@'))
+        {
+            errors[nameof(request.Email)] = ["Enter a valid email address, or leave it blank."];
+        }
+
         if (errors.Count > 0)
         {
             throw new ValidationException(errors);
         }
 
-        if (await _users.EmailExistsAsync(tenantId, email, cancellationToken: cancellationToken))
+        // The mobile number identifies an account across the whole system, so the clash is
+        // global rather than within this company.
+        if (await _users.MobileExistsAsync(mobile, cancellationToken))
         {
-            throw new ConflictException($"A user with email '{email}' already exists in this tenant.");
+            throw new ConflictException($"The mobile number '{mobile}' is already registered.");
+        }
+
+        if (email is not null && await _users.EmailExistsAsync(email, cancellationToken: cancellationToken))
+        {
+            throw new ConflictException($"A user with email '{email}' already exists.");
         }
 
         var user = new User
         {
             Id = Guid.CreateVersion7(),
-            TenantId = tenantId,
-            Email = email,
+            Mobile = mobile,
             FullName = fullName,
+            Email = email,
             PasswordHash = _passwordHasher.Hash(password),
             IsActive = true
         };
 
+        // The account and its membership of this company are created together, so a user
+        // can never exist without the access that made them worth creating.
+        user.Companies.Add(new UserCompany
+        {
+            Id = Guid.CreateVersion7(),
+            UserId = user.Id,
+            CompanyId = companyId,
+            Role = CompanyRole.Member,
+            IsActive = true
+        });
+
         _users.Add(user);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        _logger.LogInformation("User {UserId} created in tenant {TenantId}.", user.Id, tenantId);
+        _logger.LogInformation("User {UserId} added to company {CompanyId}.", user.Id, companyId);
 
         return user.ToDto();
     }
@@ -128,9 +153,9 @@ public sealed class UserService : IUserService
         UpdateUserDto request,
         CancellationToken cancellationToken = default)
     {
-        var tenantId = _currentUser.GetRequiredTenantId();
+        var companyId = _currentUser.GetRequiredCompanyId();
 
-        var user = await _users.GetByIdAsync(id, tenantId, cancellationToken)
+        var user = await _users.GetByIdAsync(id, companyId, cancellationToken)
             ?? throw new NotFoundException(nameof(User), id);
 
         var fullName = request.FullName?.Trim() ?? string.Empty;
@@ -145,7 +170,7 @@ public sealed class UserService : IUserService
 
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        _logger.LogInformation("User {UserId} updated in tenant {TenantId}.", user.Id, tenantId);
+        _logger.LogInformation("User {UserId} updated in company {CompanyId}.", user.Id, companyId);
 
         return user.ToDto();
     }
@@ -155,9 +180,9 @@ public sealed class UserService : IUserService
         UpdateUserEmailDto request,
         CancellationToken cancellationToken = default)
     {
-        var tenantId = _currentUser.GetRequiredTenantId();
+        var companyId = _currentUser.GetRequiredCompanyId();
 
-        var user = await _users.GetByIdAsync(id, tenantId, cancellationToken)
+        var user = await _users.GetByIdAsync(id, companyId, cancellationToken)
             ?? throw new NotFoundException(nameof(User), id);
 
         var email = NormaliseEmail(request.Email);
@@ -169,16 +194,16 @@ public sealed class UserService : IUserService
 
         // Re-submitting the address the user already has is a no-op rather than an error,
         // so a client retrying a request it never saw acknowledged is not punished for it.
-        if (string.Equals(user.Email, email, StringComparison.Ordinal))
+        if (string.Equals(user.Email ?? string.Empty, email, StringComparison.Ordinal))
         {
             return user.ToDto();
         }
 
         // The user is excluded from the clash check. Without that, their own row would
         // match and a change of casing would be reported as a conflict with themselves.
-        if (await _users.EmailExistsAsync(tenantId, email, id, cancellationToken))
+        if (await _users.EmailExistsAsync(email, id, cancellationToken))
         {
-            throw new ConflictException($"A user with email '{email}' already exists in this tenant.");
+            throw new ConflictException($"A user with email '{email}' already exists.");
         }
 
         var previousEmail = user.Email;
@@ -189,9 +214,9 @@ public sealed class UserService : IUserService
         // Logged because this changes how someone signs in, which is worth being able to
         // trace. The audit trail records it as well, through the usual interceptor.
         _logger.LogInformation(
-            "User {UserId} in tenant {TenantId} changed email from {PreviousEmail} to {NewEmail}.",
+            "User {UserId} in company {CompanyId} changed email from {PreviousEmail} to {NewEmail}.",
             user.Id,
-            tenantId,
+            companyId,
             previousEmail,
             email);
 

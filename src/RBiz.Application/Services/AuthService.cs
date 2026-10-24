@@ -1,27 +1,28 @@
 using Microsoft.Extensions.Logging;
 using RBiz.Application.Dtos;
 using RBiz.Application.Interfaces;
+using RBiz.Application.Mapping;
 using RBiz.Domain.Entities;
 using RBiz.Domain.Exceptions;
+using RBiz.Domain.Utilities;
 
 namespace RBiz.Application.Services;
 
 /// <inheritdoc cref="IAuthService"/>
 public sealed class AuthService : IAuthService
 {
-    // One deliberately vague message for every failure reason. Telling a caller whether
-    // it was the tenant, the email or the password that was wrong would let them probe
-    // for valid accounts.
-    private const string InvalidCredentials = "The tenant code, email address or password is incorrect.";
+    // One deliberately vague message whichever half of the credentials was wrong. Saying
+    // which would let a caller discover registered mobile numbers.
+    private const string InvalidCredentials = "The mobile number or password is incorrect.";
 
-    // Likewise for refresh: unknown, expired, revoked and wrong-device all look alike
-    // from outside. The distinction is recorded in the log, not handed to the caller.
-    private const string InvalidRefreshToken =
-        "Your session has expired. Please sign in again.";
+    private const string InvalidRefreshToken = "Your session has expired. Please sign in again.";
 
     private const string UnknownDevice = "unknown";
 
+    private const int MinPasswordLength = 8;
+
     private readonly IUserRepository _users;
+    private readonly ICompanyRepository _companies;
     private readonly IRefreshTokenRepository _refreshTokens;
     private readonly IPasswordHasher _passwordHasher;
     private readonly IJwtTokenGenerator _tokenGenerator;
@@ -29,10 +30,12 @@ public sealed class AuthService : IAuthService
     private readonly IUnitOfWork _unitOfWork;
     private readonly TimeProvider _timeProvider;
     private readonly IRefreshTokenLifetime _lifetime;
+    private readonly ICurrentUser _currentUser;
     private readonly ILogger<AuthService> _logger;
 
     public AuthService(
         IUserRepository users,
+        ICompanyRepository companies,
         IRefreshTokenRepository refreshTokens,
         IPasswordHasher passwordHasher,
         IJwtTokenGenerator tokenGenerator,
@@ -40,9 +43,11 @@ public sealed class AuthService : IAuthService
         IUnitOfWork unitOfWork,
         TimeProvider timeProvider,
         IRefreshTokenLifetime lifetime,
+        ICurrentUser currentUser,
         ILogger<AuthService> logger)
     {
         _users = users;
+        _companies = companies;
         _refreshTokens = refreshTokens;
         _passwordHasher = passwordHasher;
         _tokenGenerator = tokenGenerator;
@@ -50,52 +55,152 @@ public sealed class AuthService : IAuthService
         _unitOfWork = unitOfWork;
         _timeProvider = timeProvider;
         _lifetime = lifetime;
+        _currentUser = currentUser;
         _logger = logger;
+    }
+
+    public async Task<AuthResponseDto> RegisterAsync(
+        RegisterRequestDto request,
+        CancellationToken cancellationToken = default)
+    {
+        var fullName = request.FullName?.Trim() ?? string.Empty;
+        var mobile = IndianMobileNumber.Normalise(request.Mobile);
+        var email = string.IsNullOrWhiteSpace(request.Email) ? null : request.Email.Trim().ToUpperInvariant();
+        var password = request.Password ?? string.Empty;
+
+        var errors = new Dictionary<string, string[]>();
+
+        if (fullName.Length == 0)
+        {
+            errors[nameof(request.FullName)] = ["Enter your name."];
+        }
+
+        if (!IndianMobileNumber.IsValid(mobile))
+        {
+            errors[nameof(request.Mobile)] = ["Enter a valid 10-digit mobile number."];
+        }
+
+        if (password.Length < MinPasswordLength)
+        {
+            errors[nameof(request.Password)] =
+                [$"Password must be at least {MinPasswordLength} characters long."];
+        }
+
+        if (email is not null && !email.Contains('@'))
+        {
+            errors[nameof(request.Email)] = ["Enter a valid email address, or leave it blank."];
+        }
+
+        if (errors.Count > 0)
+        {
+            throw new ValidationException(errors);
+        }
+
+        if (await _users.MobileExistsAsync(mobile, cancellationToken))
+        {
+            throw new ConflictException(
+                "This mobile number is already registered. Sign in instead, or reset your password.");
+        }
+
+        if (email is not null && await _users.EmailExistsAsync(email, cancellationToken: cancellationToken))
+        {
+            throw new ConflictException("This email address is already registered to another account.");
+        }
+
+        var user = new User
+        {
+            Id = Guid.CreateVersion7(),
+            Mobile = mobile,
+            FullName = fullName,
+            Email = email,
+            PasswordHash = _passwordHasher.Hash(password),
+            IsActive = true
+        };
+
+        _users.Add(user);
+
+        // No company is created. A new account lands on company registration with an empty
+        // list, which is exactly the flow the sign-up screen expects.
+        var response = IssueTokens(user, NormaliseDeviceId(request.DeviceId), null, null, []);
+
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation("Account {UserId} registered for mobile ending {Last4}.",
+            user.Id,
+            mobile[^4..]);
+
+        return response;
     }
 
     public async Task<AuthResponseDto> LoginAsync(
         LoginRequestDto request,
         CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrWhiteSpace(request.TenantCode) ||
-            string.IsNullOrWhiteSpace(request.Email) ||
-            string.IsNullOrWhiteSpace(request.Password))
+        var mobile = IndianMobileNumber.Normalise(request.Mobile);
+
+        if (!IndianMobileNumber.IsValid(mobile) || string.IsNullOrEmpty(request.Password))
         {
             throw new ValidationException(InvalidCredentials);
         }
 
-        var user = await _users.GetForLoginAsync(request.TenantCode, request.Email, cancellationToken);
+        var user = await _users.GetForLoginAsync(mobile, cancellationToken);
 
-        // Note the password is verified even when no user was found, against a dummy hash,
-        // so that a wrong email and a wrong password take the same amount of time. Without
-        // this, response timing alone reveals which email addresses exist.
+        // The password is verified even when no user was found, against a throwaway hash,
+        // so a wrong number and a wrong password take the same time. Without this, response
+        // timing alone reveals which numbers are registered.
         var hashToCheck = user?.PasswordHash ?? _passwordHasher.Hash(InvalidCredentials);
 
         if (!_passwordHasher.Verify(request.Password, hashToCheck) || user is null)
         {
-            // Logged at Warning with the attempted identifiers but never the password,
-            // so repeated failures are visible to whoever watches the logs.
-            _logger.LogWarning(
-                "Failed login attempt for tenant {TenantCode} and email {Email}.",
-                request.TenantCode,
-                request.Email);
+            _logger.LogWarning("Failed sign-in attempt for mobile ending {Last4}.",
+                mobile.Length >= 4 ? mobile[^4..] : mobile);
 
             throw new ValidationException(InvalidCredentials);
         }
 
-        var deviceId = NormaliseDeviceId(request.DeviceId);
+        // Returned with the tokens so the client can decide between the company chooser and
+        // the registration screen without a second call.
+        var companies = await LoadCompaniesAsync(user.Id, cancellationToken);
 
-        // A fresh login starts a new token family, so signing in again on a second device
-        // does not entangle the two sessions.
-        var response = IssueTokens(user, deviceId, familyId: null);
+        var response = IssueTokens(user, NormaliseDeviceId(request.DeviceId), null, null, companies);
 
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        _logger.LogInformation(
-            "User {UserId} of tenant {TenantId} signed in successfully from device {DeviceId}.",
+        _logger.LogInformation("User {UserId} signed in with {CompanyCount} companies available.",
             user.Id,
-            user.TenantId,
-            deviceId);
+            companies.Count);
+
+        return response;
+    }
+
+    public async Task<AuthResponseDto> SwitchCompanyAsync(
+        Guid companyId,
+        string? deviceId,
+        CancellationToken cancellationToken = default)
+    {
+        var userId = _currentUser.UserId
+            ?? throw new UnauthorizedAccessException("A valid access token is required to switch company.");
+
+        var user = await _users.GetByIdAsync(userId, cancellationToken)
+            ?? throw new UnauthorizedAccessException("The signed-in account is no longer available.");
+
+        // Membership is re-checked here, not taken from the id the client sent. This is the
+        // single point that decides what the next token may reach.
+        var company = await _companies.GetForUserAsync(companyId, userId, cancellationToken)
+            ?? throw new NotFoundException(nameof(Company), companyId);
+
+        if (!company.IsActive)
+        {
+            throw new ConflictException($"'{company.Name}' is not active and cannot be opened.");
+        }
+
+        var companies = await LoadCompaniesAsync(userId, cancellationToken);
+
+        var response = IssueTokens(user, NormaliseDeviceId(deviceId), companyId, null, companies);
+
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation("User {UserId} switched to company {CompanyId}.", userId, companyId);
 
         return response;
     }
@@ -111,8 +216,6 @@ public sealed class AuthService : IAuthService
 
         var nowUtc = _timeProvider.GetUtcNow().UtcDateTime;
 
-        // Looked up by hash: the plain token is never stored, so a dump of this table
-        // cannot be replayed against the API.
         var tokenHash = _secureTokenFactory.Hash(request.RefreshToken);
         var stored = await _refreshTokens.GetByHashAsync(tokenHash, cancellationToken);
 
@@ -122,10 +225,8 @@ public sealed class AuthService : IAuthService
             throw new ValidationException(InvalidRefreshToken);
         }
 
-        // A token that was already rotated is being presented again. The legitimate
-        // client would have discarded it, so a copy has leaked - and we cannot tell
-        // whether this request is the attacker or the victim. Everything descended from
-        // the original login is therefore revoked, forcing a fresh sign-in.
+        // An already-rotated token presented again means a copy leaked, and we cannot tell
+        // this caller from the victim, so everything descended from that login is revoked.
         if (stored.RevokedAtUtc is not null)
         {
             var revoked = await _refreshTokens.RevokeFamilyAsync(
@@ -149,23 +250,17 @@ public sealed class AuthService : IAuthService
 
         if (stored.ExpiresAtUtc <= nowUtc)
         {
-            _logger.LogInformation(
-                "Expired refresh token presented for user {UserId}.",
-                stored.UserId);
-
+            _logger.LogInformation("Expired refresh token presented for user {UserId}.", stored.UserId);
             throw new ValidationException(InvalidRefreshToken);
         }
 
-        // Binding to the device means a token lifted from one device cannot be used from
-        // another. Only enforced when the original login supplied a device.
         var deviceId = NormaliseDeviceId(request.DeviceId);
 
         if (!string.Equals(stored.DeviceId, UnknownDevice, StringComparison.Ordinal) &&
             !string.Equals(stored.DeviceId, deviceId, StringComparison.Ordinal))
         {
             _logger.LogWarning(
-                "Refresh token for user {UserId} presented from device {PresentedDevice} " +
-                "but was issued to {IssuedDevice}.",
+                "Refresh token for user {UserId} presented from device {PresentedDevice} but issued to {IssuedDevice}.",
                 stored.UserId,
                 deviceId,
                 stored.DeviceId);
@@ -175,21 +270,23 @@ public sealed class AuthService : IAuthService
 
         var user = stored.User;
 
-        // An account disabled while the device was offline must not be revived by a
-        // refresh. The same applies to its tenant.
         if (user is null || !user.IsActive || user.IsDeleted)
         {
-            _logger.LogWarning(
-                "Refresh refused for user {UserId} because the account is unavailable.",
-                stored.UserId);
-
+            _logger.LogWarning("Refresh refused for user {UserId}: the account is unavailable.", stored.UserId);
             throw new ValidationException(InvalidRefreshToken);
         }
 
-        // Rotation: the presented token is spent and replaced. A captured token is then
-        // useful only until the real client next reconnects, at which point the replay
-        // check above fires.
-        var response = IssueTokens(user, stored.DeviceId, stored.FamilyId, out var replacement);
+        var companies = await LoadCompaniesAsync(user.Id, cancellationToken);
+
+        // The company the session was on is carried across, so a device coming back online
+        // resumes where it was instead of asking the user to choose again. Membership may
+        // have been withdrawn while it was away, so it is re-checked rather than trusted.
+        var activeCompanyId = stored.ActiveCompanyId is { } previous
+                              && companies.Any(c => c.Id == previous)
+            ? previous
+            : (Guid?)null;
+
+        var response = IssueTokens(user, stored.DeviceId, activeCompanyId, stored.FamilyId, companies, out var replacement);
 
         stored.RevokedAtUtc = nowUtc;
         stored.RevokedReason = RefreshTokenRevocationReason.Rotated;
@@ -197,17 +294,14 @@ public sealed class AuthService : IAuthService
 
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        _logger.LogInformation(
-            "Refreshed access token for user {UserId} on device {DeviceId}.",
+        _logger.LogInformation("Refreshed access token for user {UserId} on device {DeviceId}.",
             user.Id,
             stored.DeviceId);
 
         return response;
     }
 
-    public async Task LogoutAsync(
-        LogoutRequestDto request,
-        CancellationToken cancellationToken = default)
+    public async Task LogoutAsync(LogoutRequestDto request, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(request.RefreshToken))
         {
@@ -217,46 +311,54 @@ public sealed class AuthService : IAuthService
         var tokenHash = _secureTokenFactory.Hash(request.RefreshToken);
         var stored = await _refreshTokens.GetByHashAsync(tokenHash, cancellationToken);
 
-        // Signing out something already gone is a success, not an error: a client that
-        // retries a logout should not be told anything went wrong, and reporting
-        // "no such token" would confirm which tokens exist.
+        // Signing out something already gone is a success. Reporting "no such token" would
+        // confirm which tokens exist.
         if (stored is null)
         {
             return;
         }
 
-        var nowUtc = _timeProvider.GetUtcNow().UtcDateTime;
-
         await _refreshTokens.RevokeFamilyAsync(
             stored.FamilyId,
             RefreshTokenRevocationReason.SignedOut,
-            nowUtc,
+            _timeProvider.GetUtcNow().UtcDateTime,
             cancellationToken);
 
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        _logger.LogInformation(
-            "User {UserId} signed out on device {DeviceId}.",
-            stored.UserId,
-            stored.DeviceId);
+        _logger.LogInformation("User {UserId} signed out on device {DeviceId}.", stored.UserId, stored.DeviceId);
     }
 
-    private AuthResponseDto IssueTokens(User user, string deviceId, Guid? familyId) =>
-        IssueTokens(user, deviceId, familyId, out _);
+    private async Task<IReadOnlyList<CompanySummaryDto>> LoadCompaniesAsync(
+        Guid userId,
+        CancellationToken cancellationToken)
+    {
+        return await _companies.GetForUserAsync(userId, cancellationToken);
+    }
+
+    private AuthResponseDto IssueTokens(
+        User user,
+        string deviceId,
+        Guid? activeCompanyId,
+        Guid? familyId,
+        IReadOnlyList<CompanySummaryDto> companies) =>
+        IssueTokens(user, deviceId, activeCompanyId, familyId, companies, out _);
 
     /// <summary>
     /// Mints an access token and a refresh token, adding the latter to the unit of work.
-    /// The caller commits, so a login or a rotation lands as one transaction.
+    /// The caller commits, so a sign-in or a rotation lands as one transaction.
     /// </summary>
     private AuthResponseDto IssueTokens(
         User user,
         string deviceId,
+        Guid? activeCompanyId,
         Guid? familyId,
+        IReadOnlyList<CompanySummaryDto> companies,
         out RefreshToken refreshToken)
     {
         var nowUtc = _timeProvider.GetUtcNow().UtcDateTime;
 
-        var (accessToken, accessExpiresAtUtc) = _tokenGenerator.GenerateToken(user);
+        var (accessToken, accessExpiresAtUtc) = _tokenGenerator.GenerateToken(user, activeCompanyId);
         var (token, tokenHash) = _secureTokenFactory.Create();
 
         var tokenId = Guid.CreateVersion7();
@@ -264,20 +366,15 @@ public sealed class AuthService : IAuthService
         refreshToken = new RefreshToken
         {
             Id = tokenId,
-            TenantId = user.TenantId,
             UserId = user.Id,
             TokenHash = tokenHash,
             DeviceId = deviceId,
+            ActiveCompanyId = activeCompanyId,
 
-            // A rotation stays in its original family; a fresh login starts its own.
+            // A rotation stays in its original family; a fresh sign-in starts its own.
             FamilyId = familyId ?? tokenId,
 
             CreatedAtUtc = nowUtc,
-
-            // Each rotation extends the window, which keeps an actively-used device
-            // signed in indefinitely. Carrying an absolute expiry forward from the
-            // family's start would be stricter but would sign out a working device on a
-            // fixed schedule. See the README for the trade-off.
             ExpiresAtUtc = nowUtc.Add(_lifetime.RefreshTokenLifetime)
         };
 
@@ -289,9 +386,10 @@ public sealed class AuthService : IAuthService
             token,
             refreshToken.ExpiresAtUtc,
             user.Id,
-            user.TenantId,
-            user.Email,
-            user.FullName);
+            user.Mobile,
+            user.FullName,
+            activeCompanyId,
+            companies);
     }
 
     /// <summary>

@@ -17,7 +17,7 @@ public static class DependencyInjection
         // Scoped: one instance per request, matching the lifetime of the DbContext the
         // repositories behind these services depend on.
         services.AddScoped<IAuthService, AuthService>();
-        services.AddScoped<ITenantService, TenantService>();
+        services.AddScoped<ICompanyService, CompanyService>();
         services.AddScoped<IUserService, UserService>();
         services.AddScoped<IAuditLogService, AuditLogService>();
 

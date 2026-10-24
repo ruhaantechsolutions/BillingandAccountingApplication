@@ -46,7 +46,7 @@ public static class DependencyInjection
         // Registered against the shared interface so the registry picks them up
         // automatically. Order here is the order a client receives entities in, so
         // parents come before the rows that reference them.
-        services.AddScoped<ISyncEntityProvider, TenantSyncProvider>();
+        services.AddScoped<ISyncEntityProvider, CompanySyncProvider>();
         services.AddScoped<ISyncEntityProvider, UserSyncProvider>();
 
         services.AddScoped<ISyncEntityRegistry, SyncEntityRegistry>();
@@ -75,7 +75,7 @@ public static class DependencyInjection
         // Application layer unaware of EF Core.
         services.AddScoped<IUnitOfWork>(provider => provider.GetRequiredService<AppDbContext>());
 
-        services.AddScoped<ITenantRepository, TenantRepository>();
+        services.AddScoped<ICompanyRepository, CompanyRepository>();
         services.AddScoped<IUserRepository, UserRepository>();
         services.AddScoped<IAuditLogRepository, AuditLogRepository>();
         services.AddScoped<IRefreshTokenRepository, RefreshTokenRepository>();
@@ -100,6 +100,11 @@ public static class DependencyInjection
         services.AddSingleton<IPasswordHasher, PasswordHasher>();
         services.AddSingleton<IJwtTokenGenerator, JwtTokenGenerator>();
         services.AddSingleton<ISecureTokenFactory, SecureTokenFactory>();
+
+        // No live GST register is reachable without a licensed provider, so the shipped
+        // implementation reports the check as unavailable. Swap this one line to plug in
+        // a real one; nothing in the business code changes.
+        services.AddSingleton<IGstinVerificationService, NullGstinVerificationService>();
 
         // Adapts the configured day count to the TimeSpan the Application layer asks for,
         // so that layer never has to know the setting exists.

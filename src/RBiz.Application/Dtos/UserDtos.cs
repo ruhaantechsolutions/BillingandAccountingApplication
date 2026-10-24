@@ -6,16 +6,23 @@ namespace RBiz.Application.Dtos;
 /// </summary>
 public sealed record UserDto(
     Guid Id,
-    Guid TenantId,
-    string Email,
+    string Mobile,
     string FullName,
+    string? Email,
     bool IsActive,
     DateTime CreatedAtUtc);
 
-/// <summary>Payload for creating a user inside the caller's tenant.</summary>
-public sealed record CreateUserDto(string Email, string FullName, string Password);
+/// <summary>
+/// Payload for adding a user to the caller's company. The mobile number is the login
+/// identity, so it must not already belong to another account.
+/// </summary>
+public sealed record CreateUserDto(
+    string Mobile,
+    string FullName,
+    string Password,
+    string? Email = null);
 
-/// <summary>Payload for updating a user.</summary>
+/// <summary>Payload for updating a user's display name and active flag.</summary>
 public sealed record UpdateUserDto(string FullName, bool IsActive);
 
 /// <summary>

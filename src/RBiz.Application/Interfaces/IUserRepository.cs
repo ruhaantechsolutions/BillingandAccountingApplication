@@ -3,38 +3,38 @@ using RBiz.Domain.Entities;
 namespace RBiz.Application.Interfaces;
 
 /// <summary>
-/// Persistence contract for <see cref="User"/>. Every lookup is tenant-scoped so one
-/// tenant can never read another tenant's users.
+/// Persistence contract for <see cref="User"/>. Every lookup is company-scoped so one
+/// company can never read another company's users.
 /// </summary>
 public interface IUserRepository
 {
-    Task<User?> GetByIdAsync(Guid id, Guid tenantId, CancellationToken cancellationToken = default);
+    /// <summary>A user by id alone, for paths that run before a company is selected.</summary>
+    Task<User?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Finds a user for login by tenant code and email. Returns null when the tenant or
-    /// the user does not exist, or either is inactive.
+    /// A user by id, restricted to members of the given company. A caller from another
+    /// company gets null, so a guessed id behaves exactly like a missing one.
     /// </summary>
-    Task<User?> GetForLoginAsync(string tenantCode, string email, CancellationToken cancellationToken = default);
-
-    Task<IReadOnlyList<User>> GetByTenantAsync(Guid tenantId, int skip, int take, CancellationToken cancellationToken = default);
-
-    Task<int> CountByTenantAsync(Guid tenantId, CancellationToken cancellationToken = default);
+    Task<User?> GetByIdAsync(Guid id, Guid companyId, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// True when another user in the tenant already holds this email.
+    /// Finds an active user by mobile number for sign-in. Returns null when no such user
+    /// exists or the account is inactive.
     /// </summary>
-    /// <param name="tenantId">Tenant to search within.</param>
-    /// <param name="email">Normalised (trimmed, upper-case) address to look for.</param>
-    /// <param name="excludeUserId">
-    /// A user to leave out of the check, used when changing an existing user's email so
-    /// that their own current address does not count as a clash.
-    /// </param>
-    /// <param name="cancellationToken">Cancelled automatically if the client disconnects.</param>
+    Task<User?> GetForLoginAsync(string mobile, CancellationToken cancellationToken = default);
+
+    /// <summary>True when the mobile number is already registered.</summary>
+    Task<bool> MobileExistsAsync(string mobile, CancellationToken cancellationToken = default);
+
+    /// <summary>True when the email is already registered to another account.</summary>
     Task<bool> EmailExistsAsync(
-        Guid tenantId,
         string email,
         Guid? excludeUserId = null,
         CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<User>> GetByCompanyAsync(Guid companyId, int skip, int take, CancellationToken cancellationToken = default);
+
+    Task<int> CountByCompanyAsync(Guid companyId, CancellationToken cancellationToken = default);
 
     void Add(User user);
 }

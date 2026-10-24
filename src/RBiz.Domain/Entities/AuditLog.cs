@@ -19,8 +19,8 @@ public class AuditLog
 {
     public long Id { get; set; }
 
-    /// <summary>Tenant the change belonged to. Null for system-level changes.</summary>
-    public Guid? TenantId { get; set; }
+    /// <summary>Company the change belonged to. Null for system-level changes.</summary>
+    public Guid? CompanyId { get; set; }
 
     /// <summary>User who made the change. Null when performed by the system.</summary>
     public Guid? UserId { get; set; }

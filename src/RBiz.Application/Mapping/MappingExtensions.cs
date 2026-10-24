@@ -10,24 +10,45 @@ namespace RBiz.Application.Mapping;
 /// </summary>
 public static class MappingExtensions
 {
-    public static TenantDto ToDto(this Tenant tenant) => new(
-        tenant.Id,
-        tenant.Name,
-        tenant.Code,
-        tenant.IsActive,
-        tenant.CreatedAtUtc);
+    public static AddressDto ToDto(this CompanyAddress address) => new(
+        address.Line1,
+        address.Line2,
+        address.City,
+        address.State,
+        address.PinCode,
+        address.Country);
+
+    public static CompanySummaryDto ToSummaryDto(this Company company, CompanyRole role) => new(
+        company.Id,
+        company.Name,
+        company.Address?.City ?? string.Empty,
+        company.Address?.State ?? string.Empty,
+        company.GstStatus,
+        role);
+
+    public static CompanyDto ToDto(this Company company, CompanyRole role) => new(
+        company.Id,
+        company.Name,
+        company.GstStatus,
+        company.IsActive,
+        company.Address?.ToDto() ?? new AddressDto(string.Empty, null, string.Empty, string.Empty, string.Empty, "India"),
+        company.GstRegistration?.Gstin,
+        company.GstRegistration?.RegistrationType,
+        company.GstRegistration?.VerificationStatus,
+        role,
+        company.CreatedAtUtc);
 
     public static UserDto ToDto(this User user) => new(
         user.Id,
-        user.TenantId,
-        user.Email,
+        user.Mobile,
         user.FullName,
+        user.Email,
         user.IsActive,
         user.CreatedAtUtc);
 
     public static AuditLogDto ToDto(this AuditLog log) => new(
         log.Id,
-        log.TenantId,
+        log.CompanyId,
         log.UserId,
         log.Action,
         log.EntityName,

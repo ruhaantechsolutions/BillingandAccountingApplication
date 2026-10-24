@@ -11,7 +11,7 @@ namespace RBiz.Infrastructure.Persistence.Sync;
 /// Carries the whole of the delta, tombstone and conflict-detection logic so that a new
 /// synchronised entity only has to say how its rows map to and from a client payload.
 ///
-/// A subclass supplies: the entity name, the tenant scoping, a to-payload projection and
+/// A subclass supplies: the entity name, the company scoping, a to-payload projection and
 /// a from-payload apply step. Everything correctness-critical lives here, once.
 /// </summary>
 internal abstract class SyncEntityProviderBase<TEntity> : ISyncEntityProvider
@@ -30,16 +30,33 @@ internal abstract class SyncEntityProviderBase<TEntity> : ISyncEntityProvider
     public abstract string EntityName { get; }
 
     /// <summary>
-    /// Restricts a write-path lookup to one tenant.
+    /// Restricts a write-path lookup to one company.
     /// </summary>
-    protected abstract IQueryable<TEntity> ForTenant(IQueryable<TEntity> source, Guid tenantId);
+    protected abstract IQueryable<TEntity> ForCompany(IQueryable<TEntity> source, Guid companyId);
 
     /// <summary>
-    /// CLR property holding the tenant key, used to resolve the real column name for the
-    /// delta statement. Declared next to <see cref="ForTenant"/> rather than derived from
+    /// CLR property holding the company key, used to resolve the real column name for the
+    /// delta statement. Declared next to <see cref="ForCompany"/> rather than derived from
     /// it by reflection, because two obvious lines beat one clever one.
     /// </summary>
-    protected abstract string TenantPropertyName { get; }
+    protected abstract string? CompanyPropertyName { get; }
+
+    /// <summary>
+    /// The SQL restricting the delta to one company, with {0} standing for the company id
+    /// parameter.
+    ///
+    /// The default compares a column on the row itself, which suits every entity owned by
+    /// exactly one company. An entity reached through a join - a user, who may belong to
+    /// several companies - overrides this with a subquery instead.
+    /// </summary>
+    protected virtual string CompanyFilterSql(IEntityType entityType)
+    {
+        var property = CompanyPropertyName
+            ?? throw new InvalidOperationException(
+                $"{typeof(TEntity).Name} has no company column, so it must override {nameof(CompanyFilterSql)}.");
+
+        return $"{Quote(ColumnName(entityType, property))} = {{0}}";
+    }
 
     /// <summary>
     /// Field names a client is allowed to send in a payload for this entity.
@@ -57,10 +74,10 @@ internal abstract class SyncEntityProviderBase<TEntity> : ISyncEntityProvider
     protected abstract object ToPayload(TEntity entity);
 
     /// <summary>
-    /// Assigns the tenant on a newly created row. Kept out of <see cref="ApplyPayload"/>
-    /// so a client can never set the tenant itself.
+    /// Assigns the company on a newly created row. Kept out of <see cref="ApplyPayload"/>
+    /// so a client can never set the company itself.
     /// </summary>
-    protected abstract void AssignTenant(TEntity entity, Guid tenantId);
+    protected abstract void AssignCompany(TEntity entity, Guid companyId);
 
     /// <summary>
     /// Copies the client's fields onto the entity, validating as it goes. Returning a
@@ -75,7 +92,7 @@ internal abstract class SyncEntityProviderBase<TEntity> : ISyncEntityProvider
         bool isNew);
 
     public async Task<SyncEntityChangeSet> GetChangesAsync(
-        Guid tenantId,
+        Guid companyId,
         byte[] afterRowVersion,
         byte[] ceilingRowVersion,
         int limit,
@@ -97,7 +114,7 @@ internal abstract class SyncEntityProviderBase<TEntity> : ISyncEntityProvider
         // same as the first, served off the (IsDeleted, RowVersion) index. One extra row
         // is fetched purely to detect another page, avoiding a second COUNT.
         var rows = await Context.Set<TEntity>()
-            .FromSqlRaw(sql, tenantId, afterRowVersion, ceilingRowVersion)
+            .FromSqlRaw(sql, companyId, afterRowVersion, ceilingRowVersion)
             .IgnoreQueryFilters()
             .AsNoTracking()
             .ToListAsync(cancellationToken);
@@ -135,7 +152,7 @@ internal abstract class SyncEntityProviderBase<TEntity> : ISyncEntityProvider
     }
 
     public async Task<SyncPushItemResult> ApplyAsync(
-        Guid tenantId,
+        Guid companyId,
         SyncPushItem item,
         CancellationToken cancellationToken = default)
     {
@@ -168,15 +185,15 @@ internal abstract class SyncEntityProviderBase<TEntity> : ISyncEntityProvider
             }
         }
 
-        // Tracked, and tenant-scoped: a client cannot reach another tenant's row even by
+        // Tracked, and tenant-scoped: a client cannot reach another company's row even by
         // guessing its id, because the predicate would not match.
-        var existing = await ForTenant(Context.Set<TEntity>().IgnoreQueryFilters(), tenantId)
+        var existing = await ForCompany(Context.Set<TEntity>().IgnoreQueryFilters(), companyId)
             .FirstOrDefaultAsync(e => e.Id == item.Id, cancellationToken);
 
         return item.ChangeType switch
         {
             SyncChangeType.Delete => ApplyDelete(item, existing),
-            SyncChangeType.Upsert => ApplyUpsert(tenantId, item, existing, payload!),
+            SyncChangeType.Upsert => ApplyUpsert(companyId, item, existing, payload!),
             _ => Rejected(item, $"Unsupported change type '{item.ChangeType}'.")
         };
     }
@@ -208,7 +225,7 @@ internal abstract class SyncEntityProviderBase<TEntity> : ISyncEntityProvider
     }
 
     private SyncPushItemResult ApplyUpsert(
-        Guid tenantId,
+        Guid companyId,
         SyncPushItem item,
         TEntity? existing,
         Dictionary<string, object?> payload)
@@ -243,7 +260,7 @@ internal abstract class SyncEntityProviderBase<TEntity> : ISyncEntityProvider
 
         if (isNew)
         {
-            AssignTenant(entity, tenantId);
+            AssignCompany(entity, companyId);
         }
 
         var rejection = ApplyPayload(entity, payload, isNew);
@@ -333,12 +350,12 @@ internal abstract class SyncEntityProviderBase<TEntity> : ISyncEntityProvider
             ? Quote(tableName)
             : Quote(schema) + "." + Quote(tableName);
 
-        var tenantColumn = Quote(ColumnName(entityType, TenantPropertyName));
+        var companyFilter = CompanyFilterSql(entityType);
         var rowVersion = Quote(ColumnName(entityType, nameof(SyncableEntity.RowVersion)));
 
         return
             $"SELECT TOP({take}) * FROM {qualifiedTable} " +
-            $"WHERE {tenantColumn} = {{0}} " +
+            $"WHERE {companyFilter} " +
             $"AND {rowVersion} > {{1}} " +
             $"AND {rowVersion} <= {{2}} " +
             $"ORDER BY {rowVersion}";

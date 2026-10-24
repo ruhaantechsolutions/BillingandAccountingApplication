@@ -28,9 +28,9 @@ internal sealed class SyncOperationConfiguration : IEntityTypeConfiguration<Sync
         // The guarantee that makes a push idempotent. Unique in the database rather than
         // checked in code, so two retries arriving at the same moment on different
         // servers cannot both get through.
-        builder.HasIndex(o => new { o.TenantId, o.OperationId })
+        builder.HasIndex(o => new { o.CompanyId, o.OperationId })
             .IsUnique()
-            .HasDatabaseName("UX_SyncOperations_Tenant_Operation");
+            .HasDatabaseName("UX_SyncOperations_Company_Operation");
 
         // Supports pruning old ledger rows once their retry window has passed.
         builder.HasIndex(o => o.AppliedAtUtc);

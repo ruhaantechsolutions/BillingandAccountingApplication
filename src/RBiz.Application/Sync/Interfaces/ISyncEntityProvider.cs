@@ -27,7 +27,7 @@ public interface ISyncEntityProvider
     /// long-running transaction from being skipped forever.
     /// </summary>
     Task<SyncEntityChangeSet> GetChangesAsync(
-        Guid tenantId,
+        Guid companyId,
         byte[] afterRowVersion,
         byte[] ceilingRowVersion,
         int limit,
@@ -38,7 +38,7 @@ public interface ISyncEntityProvider
     /// batch together so a partially-applied push cannot be left behind.
     /// </summary>
     Task<SyncPushItemResult> ApplyAsync(
-        Guid tenantId,
+        Guid companyId,
         SyncPushItem item,
         CancellationToken cancellationToken = default);
 }

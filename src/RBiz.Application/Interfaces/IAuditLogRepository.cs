@@ -9,7 +9,7 @@ namespace RBiz.Application.Interfaces;
 /// </summary>
 public interface IAuditLogRepository
 {
-    Task<IReadOnlyList<AuditLog>> GetByTenantAsync(Guid tenantId, int skip, int take, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<AuditLog>> GetByCompanyAsync(Guid companyId, int skip, int take, CancellationToken cancellationToken = default);
 
-    Task<int> CountByTenantAsync(Guid tenantId, CancellationToken cancellationToken = default);
+    Task<int> CountByCompanyAsync(Guid companyId, CancellationToken cancellationToken = default);
 }

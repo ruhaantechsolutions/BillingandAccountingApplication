@@ -42,8 +42,8 @@ public sealed class SyncService : ISyncService
         int? limit,
         CancellationToken cancellationToken = default)
     {
-        // Always the caller's own tenant, from the validated token.
-        var tenantId = _currentUser.GetRequiredTenantId();
+        // Always the caller's own company, from the validated token.
+        var companyId = _currentUser.GetRequiredCompanyId();
 
         if (!SyncCursor.TryDecode(cursor, out var afterRowVersion))
         {
@@ -68,7 +68,7 @@ public sealed class SyncService : ISyncService
         foreach (var provider in providers)
         {
             var changeSet = await provider.GetChangesAsync(
-                tenantId,
+                companyId,
                 afterRowVersion,
                 ceiling,
                 pageSize,
@@ -78,8 +78,8 @@ public sealed class SyncService : ISyncService
         }
 
         _logger.LogInformation(
-            "Sync pull for tenant {TenantId} returned {ChangeCount} changes across {EntityCount} entities.",
-            tenantId,
+            "Sync pull for company {CompanyId} returned {ChangeCount} changes across {EntityCount} entities.",
+            companyId,
             changeSets.Sum(c => c.Changes.Count),
             changeSets.Count);
 
@@ -90,7 +90,7 @@ public sealed class SyncService : ISyncService
         SyncPushRequest request,
         CancellationToken cancellationToken = default)
     {
-        var tenantId = _currentUser.GetRequiredTenantId();
+        var companyId = _currentUser.GetRequiredCompanyId();
 
         ValidatePushRequest(request);
 
@@ -99,7 +99,7 @@ public sealed class SyncService : ISyncService
 
         foreach (var item in request.Items)
         {
-            var result = await ApplyItemAsync(tenantId, request.DeviceId, item, nowUtc, cancellationToken);
+            var result = await ApplyItemAsync(companyId, request.DeviceId, item, nowUtc, cancellationToken);
             results.Add(result);
         }
 
@@ -110,10 +110,10 @@ public sealed class SyncService : ISyncService
         var response = new SyncPushResponse(results, nowUtc);
 
         _logger.LogInformation(
-            "Sync push from device {DeviceId} for tenant {TenantId}: {Applied} applied, " +
+            "Sync push from device {DeviceId} for company {CompanyId}: {Applied} applied, " +
             "{Conflicts} conflicts, {Rejected} rejected.",
             request.DeviceId,
-            tenantId,
+            companyId,
             response.AppliedCount,
             response.ConflictCount,
             response.RejectedCount);
@@ -131,7 +131,7 @@ public sealed class SyncService : ISyncService
     /// Handles one pushed change, short-circuiting anything already seen.
     /// </summary>
     private async Task<SyncPushItemResult> ApplyItemAsync(
-        Guid tenantId,
+        Guid companyId,
         string deviceId,
         SyncPushItem item,
         DateTime nowUtc,
@@ -149,7 +149,7 @@ public sealed class SyncService : ISyncService
 
         // A retry of something already handled returns the original answer instead of
         // applying it a second time.
-        var existing = await _store.FindOperationAsync(tenantId, item.OperationId, cancellationToken);
+        var existing = await _store.FindOperationAsync(companyId, item.OperationId, cancellationToken);
 
         if (existing is not null)
         {
@@ -163,10 +163,10 @@ public sealed class SyncService : ISyncService
                 null);
         }
 
-        var result = await provider.ApplyAsync(tenantId, item, cancellationToken);
+        var result = await provider.ApplyAsync(companyId, item, cancellationToken);
 
         _store.RecordOperation(
-            tenantId,
+            companyId,
             item.OperationId,
             deviceId,
             item.Entity,

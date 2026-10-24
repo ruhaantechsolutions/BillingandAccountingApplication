@@ -38,17 +38,17 @@ internal sealed class SyncStore : ISyncStore
     }
 
     public Task<SyncOperation?> FindOperationAsync(
-        Guid tenantId,
+        Guid companyId,
         Guid operationId,
         CancellationToken cancellationToken = default) =>
         _context.SyncOperations
             .AsNoTracking()
             .FirstOrDefaultAsync(
-                o => o.TenantId == tenantId && o.OperationId == operationId,
+                o => o.CompanyId == companyId && o.OperationId == operationId,
                 cancellationToken);
 
     public void RecordOperation(
-        Guid tenantId,
+        Guid companyId,
         Guid operationId,
         string deviceId,
         string entityName,
@@ -57,7 +57,7 @@ internal sealed class SyncStore : ISyncStore
         DateTime appliedAtUtc) =>
         _context.SyncOperations.Add(new SyncOperation
         {
-            TenantId = tenantId,
+            CompanyId = companyId,
             OperationId = operationId,
             DeviceId = deviceId,
             EntityName = entityName,

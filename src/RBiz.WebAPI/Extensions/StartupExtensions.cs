@@ -45,17 +45,16 @@ internal static class StartupExtensions
         {
             var seedSection = section.GetSection("Seed");
 
-            var tenantName = seedSection.GetValue<string>("TenantName");
-            var tenantCode = seedSection.GetValue<string>("TenantCode");
-            var adminEmail = seedSection.GetValue<string>("AdminEmail");
-            var adminPassword = seedSection.GetValue<string>("AdminPassword");
+            var fullName = seedSection.GetValue<string>("FullName");
+            var mobile = seedSection.GetValue<string>("Mobile");
+            var password = seedSection.GetValue<string>("Password");
+            var email = seedSection.GetValue<string>("Email");
 
             // Rather than invent a default password, refuse to seed without one. A
             // well-known fallback credential is how a demo account reaches production.
-            if (string.IsNullOrWhiteSpace(tenantName) ||
-                string.IsNullOrWhiteSpace(tenantCode) ||
-                string.IsNullOrWhiteSpace(adminEmail) ||
-                string.IsNullOrWhiteSpace(adminPassword))
+            if (string.IsNullOrWhiteSpace(fullName) ||
+                string.IsNullOrWhiteSpace(mobile) ||
+                string.IsNullOrWhiteSpace(password))
             {
                 logger.LogWarning(
                     "Database:SeedOnStartup is enabled but the Database:Seed values are " +
@@ -65,7 +64,8 @@ internal static class StartupExtensions
             }
 
             var seeder = scope.ServiceProvider.GetRequiredService<DatabaseSeeder>();
-            await seeder.SeedAsync(tenantName, tenantCode, adminEmail, adminPassword);
+
+            await seeder.SeedAsync(fullName, mobile, password, email);
         }
     }
 }

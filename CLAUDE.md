@@ -9,13 +9,14 @@ Billing and accounting API. .NET 10, Clean Architecture, SQL Server.
 
 ---
 
-## Status — 2026-10-10
+## Status — 2026-10-24
 
 | Branch | Commit | State |
 | --- | --- | --- |
-| `development/code_backend` | `c6811a5` | Integration branch. Base for features. |
-| `feature/pwa-offline-sync` | `d0fdbb2` | Sync + refresh tokens. Pushed, not merged. |
-| `claude/pensive-feynman-guggpn` | `9344ce9` | Dead. Superseded; being deleted by hand on GitHub. |
+| `development/code_backend` | `b70c880` | Integration branch. Now carries sync + refresh tokens. |
+| `feature/company-creation` | current | Company module: mobile login, registration, companies. |
+| `feature/pwa-offline-sync` | `b70c880` | Merged into development/code_backend. Can be deleted. |
+| `claude/pensive-feynman-guggpn` | `9344ce9` | Dead. Superseded; delete by hand on GitHub. |
 
 Three commits on the feature branch: offline sync (`ace46ea`), a merge of the base
 (`fbe40eb`), refresh tokens (`d0fdbb2`).
@@ -26,8 +27,8 @@ Tenant/User/AuditLog entities with automatic audit trail; offline sync (rowversi
 deltas, tombstones, idempotent push, server-authoritative conflicts); refresh tokens with
 rotation and reuse detection.
 
-**Migrations, in order:** `InitialCreate`, `AddSyncSupport`, `AddRefreshTokens`. None
-applied to a real database yet by me — see *Not verified* below.
+**Migrations:** consolidated to a single `InitialCreate` (2026-10-24). The three earlier
+migrations were deleted, so an existing `RBiz_Dev` must be dropped before applying it.
 
 See `README.md` for how it all works. This file is only what a future session needs in
 order not to redo or re-ask.
@@ -39,6 +40,9 @@ order not to redo or re-ask.
 | Topic | Decision |
 | --- | --- |
 | Database | **SQL Server**, EF Core 10.0.12. Dev uses LocalDB (`Data Source=(localdb)\MSSQLLocalDB`). |
+| Core model | **User → many Companies** via `UserCompany`. There is no Tenant; `Company` replaced it. The active company travels in the JWT as `company_id`. |
+| Login identity | **Mobile number**, globally unique, `^[6-9][0-9]{9}$`. Email is optional and not used to sign in. |
+| GSTIN | Format + state code + **mod-36 check digit**, all offline, in `Domain/Utilities/GstinValidator`. No open-source service verifies against the live register; `IGstinVerificationService` is the seam for a licensed GSP. |
 | Logging | **Serilog** (log4net was declined). Inner layers log via `ILogger<T>` only. |
 | Naming | Namespaces and projects `RBiz.*`. "R-Biz" has a hyphen, illegal in C# identifiers. |
 | Solution file | Classic **`RBiz.sln`**, not .NET 10's default `.slnx` — older Visual Studio cannot open `.slnx`. |
@@ -93,6 +97,9 @@ configuration, never a migration's `HasData`.
 - **`byte[]` cannot be compared in LINQ**, so the rowversion delta range is parameterised
   raw SQL built from EF model metadata. There is nothing for EF Core to translate.
 - **Records need `<param>` docs for every parameter** or none, under warnings-as-errors.
+- **NuGet audit fails the build.** `Microsoft.Data.SqlClient` pulls a vulnerable
+  `System.Security.Cryptography.Pkcs`; it is pinned to a patched version in
+  `Directory.Packages.props`. Pin, never disable the audit.
 
 ---
 
@@ -124,6 +131,11 @@ configuration, never a migration's `HasData`.
 6. A sync provider's `WritableFields` is its entire write surface. Unknown payload fields
    are **rejected**, never ignored, so a device is never told a discarded change was
    applied. Keep that rule when adding Billing and Stock.
+7. **Company address editing** has no endpoint yet (`PUT /companies/{id}/address`), and
+   nor do `CompanyAddress`, `CompanyGstRegistration` or `Location` have sync providers.
+   The schema is sync-ready; the providers are added when the PWA needs them.
+8. The wireframe's example GSTIN `24ABCDE1234F1Z5` **fails its own check digit**. The
+   backend uses `24ABCDE1234F1Z6` in its message; the front end should be corrected too.
 
 ---
 

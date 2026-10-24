@@ -5,7 +5,7 @@ namespace RBiz.Application.Dtos;
 /// <summary>A single audit-trail entry as returned by the API.</summary>
 public sealed record AuditLogDto(
     long Id,
-    Guid? TenantId,
+    Guid? CompanyId,
     Guid? UserId,
     AuditAction Action,
     string EntityName,
