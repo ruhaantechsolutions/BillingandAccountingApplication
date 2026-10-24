@@ -21,16 +21,16 @@ public sealed class AuditLogService : IAuditLogService
         PageRequest page,
         CancellationToken cancellationToken = default)
     {
-        var tenantId = _currentUser.GetRequiredTenantId();
+        var companyId = _currentUser.GetRequiredCompanyId();
 
-        var total = await _auditLogs.CountByTenantAsync(tenantId, cancellationToken);
+        var total = await _auditLogs.CountByCompanyAsync(companyId, cancellationToken);
 
         if (total == 0)
         {
             return new PagedResult<AuditLogDto>([], page.Page, page.PageSize, 0);
         }
 
-        var logs = await _auditLogs.GetByTenantAsync(tenantId, page.Skip, page.PageSize, cancellationToken);
+        var logs = await _auditLogs.GetByCompanyAsync(companyId, page.Skip, page.PageSize, cancellationToken);
 
         return new PagedResult<AuditLogDto>(
             logs.ToDtoList(static l => l.ToDto()),

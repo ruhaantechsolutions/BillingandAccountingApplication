@@ -43,7 +43,15 @@ public sealed class AppDbContext : DbContext, IUnitOfWork
         _timeProvider = timeProvider;
     }
 
-    public DbSet<Tenant> Tenants => Set<Tenant>();
+    public DbSet<Company> Companies => Set<Company>();
+
+    public DbSet<UserCompany> UserCompanies => Set<UserCompany>();
+
+    public DbSet<CompanyAddress> CompanyAddresses => Set<CompanyAddress>();
+
+    public DbSet<CompanyGstRegistration> CompanyGstRegistrations => Set<CompanyGstRegistration>();
+
+    public DbSet<Location> Locations => Set<Location>();
 
     public DbSet<User> Users => Set<User>();
 
@@ -162,7 +170,7 @@ public sealed class AppDbContext : DbContext, IUnitOfWork
     private List<AuditLog> BuildAuditLogs(DateTime nowUtc, Guid? userId)
     {
         var logs = new List<AuditLog>();
-        var tenantId = _currentUser.TenantId;
+        var companyId = _currentUser.CompanyId;
 
         foreach (var entry in ChangeTracker.Entries())
         {
@@ -191,7 +199,7 @@ public sealed class AppDbContext : DbContext, IUnitOfWork
 
             logs.Add(new AuditLog
             {
-                TenantId = ResolveTenantId(entry) ?? tenantId,
+                CompanyId = ResolveCompanyId(entry) ?? companyId,
                 UserId = userId,
                 Action = action,
                 EntityName = entry.Metadata.ClrType.Name,
@@ -271,10 +279,16 @@ public sealed class AppDbContext : DbContext, IUnitOfWork
     /// Reads the TenantId off the entity when it has one, so an audit row is attributed to
     /// the right tenant even for a system-initiated change.
     /// </summary>
-    private static Guid? ResolveTenantId(EntityEntry entry) => entry.Entity switch
+    private static Guid? ResolveCompanyId(EntityEntry entry) => entry.Entity switch
     {
-        User user => user.TenantId,
-        Tenant tenant => tenant.Id,
+        Company company => company.Id,
+        CompanyAddress address => address.CompanyId,
+        CompanyGstRegistration gst => gst.CompanyId,
+        UserCompany membership => membership.CompanyId,
+        Location location => location.CompanyId,
+
+        // A user belongs to no single company, so their changes are attributed to the
+        // company the caller was acting on rather than to one read off the row.
         _ => null
     };
 

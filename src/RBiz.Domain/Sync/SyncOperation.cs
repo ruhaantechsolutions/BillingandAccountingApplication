@@ -12,8 +12,8 @@ public class SyncOperation
 {
     public long Id { get; set; }
 
-    /// <summary>Tenant the operation belonged to. Part of the uniqueness rule.</summary>
-    public Guid TenantId { get; set; }
+    /// <summary>Company the operation belonged to. Part of the uniqueness rule.</summary>
+    public Guid CompanyId { get; set; }
 
     /// <summary>
     /// Identifier the client generated for this change and reuses on every retry.

@@ -32,8 +32,8 @@ internal sealed class AuditLogConfiguration : IEntityTypeConfiguration<AuditLog>
         builder.Property(a => a.OldValues);
         builder.Property(a => a.NewValues);
 
-        // Supports the only query pattern there is: newest-first for one tenant.
-        builder.HasIndex(a => new { a.TenantId, a.TimestampUtc })
+        // Supports the only query pattern there is: newest-first for one company.
+        builder.HasIndex(a => new { a.CompanyId, a.TimestampUtc })
             .IsDescending(false, true);
 
         // No foreign keys to Tenant or User on purpose: the trail must survive even if

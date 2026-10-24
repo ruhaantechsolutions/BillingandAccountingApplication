@@ -21,7 +21,7 @@ internal sealed class CurrentUser : ICurrentUser
 
     public Guid? UserId => GetGuidClaim(JwtRegisteredClaimNames.Sub, ClaimTypes.NameIdentifier);
 
-    public Guid? TenantId => GetGuidClaim(AppClaimTypes.TenantId);
+    public Guid? CompanyId => GetGuidClaim(AppClaimTypes.CompanyId);
 
     public string? Email =>
         Principal?.FindFirst(JwtRegisteredClaimNames.Email)?.Value
@@ -29,9 +29,9 @@ internal sealed class CurrentUser : ICurrentUser
 
     public bool IsAuthenticated => Principal?.Identity?.IsAuthenticated ?? false;
 
-    public Guid GetRequiredTenantId() =>
-        TenantId ?? throw new UnauthorizedAccessException(
-            "The request is not associated with a tenant. A valid access token is required.");
+    public Guid GetRequiredCompanyId() =>
+        CompanyId ?? throw new UnauthorizedAccessException(
+            "No company is selected. Open a company first, then retry.");
 
     /// <summary>
     /// Looks for the claim under any of the given names. ASP.NET Core may remap short JWT

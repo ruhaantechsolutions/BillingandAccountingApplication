@@ -28,10 +28,31 @@ internal sealed class JwtTokenGenerator : IJwtTokenGenerator
         _signingCredentials = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
     }
 
-    public (string Token, DateTime ExpiresAtUtc) GenerateToken(User user)
+    public (string Token, DateTime ExpiresAtUtc) GenerateToken(User user, Guid? companyId)
     {
         var nowUtc = _timeProvider.GetUtcNow().UtcDateTime;
         var expiresAtUtc = nowUtc.AddMinutes(_settings.ExpiryMinutes);
+
+        var claims = new Dictionary<string, object>
+        {
+            [JwtRegisteredClaimNames.Sub] = user.Id.ToString(),
+            [JwtRegisteredClaimNames.Jti] = Guid.CreateVersion7().ToString(),
+            [ClaimTypes.MobilePhone] = user.Mobile,
+            [ClaimTypes.Name] = user.FullName
+        };
+
+        // Absent immediately after sign-in: the person has companies but has not opened
+        // one yet. Services reading company data refuse a token without it rather than
+        // falling back to some default company.
+        if (companyId is { } selected)
+        {
+            claims[AppClaimTypes.CompanyId] = selected.ToString();
+        }
+
+        if (!string.IsNullOrWhiteSpace(user.Email))
+        {
+            claims[JwtRegisteredClaimNames.Email] = user.Email;
+        }
 
         var descriptor = new SecurityTokenDescriptor
         {
@@ -41,14 +62,7 @@ internal sealed class JwtTokenGenerator : IJwtTokenGenerator
             NotBefore = nowUtc,
             Expires = expiresAtUtc,
             SigningCredentials = _signingCredentials,
-            Claims = new Dictionary<string, object>
-            {
-                [JwtRegisteredClaimNames.Sub] = user.Id.ToString(),
-                [JwtRegisteredClaimNames.Jti] = Guid.CreateVersion7().ToString(),
-                [JwtRegisteredClaimNames.Email] = user.Email,
-                [ClaimTypes.Name] = user.FullName,
-                [AppClaimTypes.TenantId] = user.TenantId.ToString()
-            }
+            Claims = claims
         };
 
         // JsonWebTokenHandler is the current, faster handler; the older

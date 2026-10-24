@@ -77,14 +77,14 @@ public sealed class AppDbContextFactory : IDesignTimeDbContextFactory<AppDbConte
     {
         public Guid? UserId => null;
 
-        public Guid? TenantId => null;
+        public Guid? CompanyId => null;
 
         public string? Email => null;
 
         public bool IsAuthenticated => false;
 
-        public Guid GetRequiredTenantId() =>
+        public Guid GetRequiredCompanyId() =>
             throw new InvalidOperationException(
-                "No tenant is available at design time. This context is only for EF tooling.");
+                "No company is available at design time. This context is only for EF tooling.");
     }
 }

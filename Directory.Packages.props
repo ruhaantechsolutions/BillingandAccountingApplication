@@ -8,6 +8,16 @@
     <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
     <CentralPackageTransitivePinningEnabled>true</CentralPackageTransitivePinningEnabled>
   </PropertyGroup>
+  <ItemGroup Label="Security patches for transitive packages">
+    <!--
+      Microsoft.Data.SqlClient 6.1.6 depends on System.Security.Cryptography.Pkcs 9.0.11,
+      which carries a high-severity advisory (GHSA-846f-f764-76mx). Transitive pinning is
+      enabled, so naming a patched version here lifts the whole graph onto it. The NuGet
+      audit fails the build otherwise, which is exactly what should happen.
+    -->
+    <PackageVersion Include="System.Security.Cryptography.Pkcs" Version="10.0.13" />
+  </ItemGroup>
+
   <ItemGroup Label="Persistence (Infrastructure)">
     <PackageVersion Include="Microsoft.EntityFrameworkCore" Version="10.0.12" />
     <PackageVersion Include="Microsoft.EntityFrameworkCore.SqlServer" Version="10.0.12" />

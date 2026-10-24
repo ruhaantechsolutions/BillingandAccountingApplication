@@ -11,63 +11,63 @@ internal sealed class UserRepository : IUserRepository
 
     public UserRepository(AppDbContext context) => _context = context;
 
+    /// <summary>A user by id alone, for paths that run before a company is chosen.</summary>
+    public Task<User?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default) =>
+        _context.Users.FirstOrDefaultAsync(u => u.Id == id, cancellationToken);
+
     /// <summary>
-    /// Tracked, because callers of this overload go on to modify the user and save.
-    /// The tenant is part of the predicate, so a mismatched id behaves exactly like a
-    /// missing one.
+    /// Tracked, because callers go on to modify the user and save. Membership of the
+    /// company is part of the predicate, so a user outside it behaves like a missing one.
     /// </summary>
     public Task<User?> GetByIdAsync(
         Guid id,
-        Guid tenantId,
+        Guid companyId,
         CancellationToken cancellationToken = default) =>
         _context.Users.FirstOrDefaultAsync(
-            u => u.Id == id && u.TenantId == tenantId,
+            u => u.Id == id && u.Companies.Any(c => c.CompanyId == companyId && c.IsActive),
             cancellationToken);
 
-    public Task<User?> GetForLoginAsync(
-        string tenantCode,
-        string email,
-        CancellationToken cancellationToken = default)
-    {
-        var normalisedCode = tenantCode.Trim().ToUpperInvariant();
-        var normalisedEmail = email.Trim().ToUpperInvariant();
-
-        // Both the tenant and the user must be active, enforced in the query so an
-        // inactive account never leaves the database.
-        return _context.Users
+    /// <summary>
+    /// Sign-in lookup by mobile number. Only an active account is returned, so a disabled
+    /// user is refused in the query rather than after loading the row.
+    /// </summary>
+    public Task<User?> GetForLoginAsync(string mobile, CancellationToken cancellationToken = default) =>
+        _context.Users
             .AsNoTracking()
-            .Where(u => u.Email == normalisedEmail
-                        && u.IsActive
-                        && u.Tenant!.Code == normalisedCode
-                        && u.Tenant.IsActive)
-            .FirstOrDefaultAsync(cancellationToken);
-    }
+            .FirstOrDefaultAsync(u => u.Mobile == mobile && u.IsActive, cancellationToken);
 
-    public async Task<IReadOnlyList<User>> GetByTenantAsync(
-        Guid tenantId,
-        int skip,
-        int take,
-        CancellationToken cancellationToken = default) =>
-        await _context.Users
-            .AsNoTracking()
-            .Where(u => u.TenantId == tenantId)
-            .OrderBy(u => u.FullName)
-            .Skip(skip)
-            .Take(take)
-            .ToListAsync(cancellationToken);
-
-    public Task<int> CountByTenantAsync(Guid tenantId, CancellationToken cancellationToken = default) =>
-        _context.Users.CountAsync(u => u.TenantId == tenantId, cancellationToken);
+    public Task<bool> MobileExistsAsync(string mobile, CancellationToken cancellationToken = default) =>
+        _context.Users.AnyAsync(u => u.Mobile == mobile, cancellationToken);
 
     public Task<bool> EmailExistsAsync(
-        Guid tenantId,
         string email,
         Guid? excludeUserId = null,
         CancellationToken cancellationToken = default) =>
         _context.Users.AnyAsync(
-            u => u.TenantId == tenantId
-                 && u.Email == email
-                 && (excludeUserId == null || u.Id != excludeUserId),
+            u => u.Email == email && (excludeUserId == null || u.Id != excludeUserId),
+            cancellationToken);
+
+    /// <summary>
+    /// Users of one company, reached through the membership join. Read-only, so no change
+    /// tracking snapshots are built for rows that will only be serialised.
+    /// </summary>
+    public async Task<IReadOnlyList<User>> GetByCompanyAsync(
+        Guid companyId,
+        int skip,
+        int take,
+        CancellationToken cancellationToken = default) =>
+        await _context.UserCompanies
+            .AsNoTracking()
+            .Where(uc => uc.CompanyId == companyId && uc.IsActive)
+            .OrderBy(uc => uc.User!.FullName)
+            .Skip(skip)
+            .Take(take)
+            .Select(uc => uc.User!)
+            .ToListAsync(cancellationToken);
+
+    public Task<int> CountByCompanyAsync(Guid companyId, CancellationToken cancellationToken = default) =>
+        _context.UserCompanies.CountAsync(
+            uc => uc.CompanyId == companyId && uc.IsActive,
             cancellationToken);
 
     public void Add(User user) => _context.Users.Add(user);

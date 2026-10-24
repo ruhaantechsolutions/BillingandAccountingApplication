@@ -14,6 +14,31 @@ public interface IAuthService
     Task<AuthResponseDto> LoginAsync(LoginRequestDto request, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Creates an account and signs it straight in, so the caller lands on company
+    /// registration without a second round trip.
+    /// </summary>
+    /// <exception cref="Domain.Exceptions.ConflictException">
+    /// The mobile number, or the email if one was given, is already registered.
+    /// </exception>
+    Task<AuthResponseDto> RegisterAsync(
+        RegisterRequestDto request,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Issues a new access token scoped to one of the caller's companies.
+    ///
+    /// This is what makes switching company safe: the company lives in the token, so the
+    /// data a request can reach changes with it rather than only the name on screen.
+    /// </summary>
+    /// <exception cref="Domain.Exceptions.NotFoundException">
+    /// The company does not exist, or the caller is not a member of it.
+    /// </exception>
+    Task<AuthResponseDto> SwitchCompanyAsync(
+        Guid companyId,
+        string? deviceId,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Exchanges a refresh token for a new access token, rotating the refresh token in
     /// the process.
     ///

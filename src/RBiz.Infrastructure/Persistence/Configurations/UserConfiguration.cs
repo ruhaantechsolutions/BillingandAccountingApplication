@@ -17,9 +17,12 @@ internal sealed class UserConfiguration : IEntityTypeConfiguration<User>
 
         builder.HasKey(u => u.Id);
 
-        builder.Property(u => u.Email)
-            .HasMaxLength(256)
+        builder.Property(u => u.Mobile)
+            .HasMaxLength(10)
             .IsRequired();
+
+        builder.Property(u => u.Email)
+            .HasMaxLength(256);
 
         builder.Property(u => u.FullName)
             .HasMaxLength(200)
@@ -32,16 +35,18 @@ internal sealed class UserConfiguration : IEntityTypeConfiguration<User>
         builder.Property(u => u.IsActive)
             .HasDefaultValue(true);
 
-        // An email is unique within a tenant, not globally: the same person may exist in
-        // two different businesses. This index also serves the login lookup.
-        builder.HasIndex(u => new { u.TenantId, u.Email })
-            .IsUnique();
+        // The login identity, so uniqueness is global rather than per company: sign-in
+        // asks only for a number and a password and has no company to scope it by.
+        builder.HasIndex(u => u.Mobile)
+            .IsUnique()
+            .HasDatabaseName("UX_Users_Mobile");
 
-        builder.HasOne(u => u.Tenant)
-            .WithMany(t => t.Users)
-            .HasForeignKey(u => u.TenantId)
-            // Deleting a tenant must not silently delete its users and orphan their audit
-            // history; the delete is blocked until the users are dealt with explicitly.
-            .OnDelete(DeleteBehavior.Restrict);
+        // Email is optional, so the index ignores rows without one. Without the filter a
+        // second user with no email would collide with the first.
+        builder.HasIndex(u => u.Email)
+            .IsUnique()
+            .HasFilter("[Email] IS NOT NULL AND [IsDeleted] = 0")
+            .HasDatabaseName("UX_Users_Email");
+
     }
 }

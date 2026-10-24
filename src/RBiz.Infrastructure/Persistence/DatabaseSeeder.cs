@@ -2,13 +2,17 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using RBiz.Application.Interfaces;
 using RBiz.Domain.Entities;
+using RBiz.Domain.Utilities;
 
 namespace RBiz.Infrastructure.Persistence;
 
 /// <summary>
-/// Creates the first tenant and administrator so the API is usable straight after a
-/// migration. Deliberately not seeded through a migration's HasData: that would commit a
-/// fixed password hash to source control and give every deployment the same credential.
+/// Creates the first account so the API can be signed into straight after a migration.
+///
+/// Deliberately seeds no company. A new account is meant to land on company registration
+/// with an empty list, and seeding one would hide the very flow this module exists to
+/// provide. It is also not done through a migration's HasData: that would commit a fixed
+/// password hash to source control and give every deployment the same credential.
 /// </summary>
 public sealed class DatabaseSeeder
 {
@@ -27,47 +31,52 @@ public sealed class DatabaseSeeder
     }
 
     /// <summary>
-    /// Inserts the seed tenant and user when the database has no tenants yet. Safe to call
-    /// on every startup: it is a no-op once any tenant exists.
+    /// Inserts the seed account when no user exists yet. Safe to call on every startup:
+    /// it is a no-op once any account is present.
     /// </summary>
     public async Task SeedAsync(
-        string tenantName,
-        string tenantCode,
-        string adminEmail,
-        string adminPassword,
+        string fullName,
+        string mobile,
+        string password,
+        string? email,
         CancellationToken cancellationToken = default)
     {
-        if (await _context.Tenants.AnyAsync(cancellationToken))
+        if (await _context.Users.AnyAsync(cancellationToken))
         {
             return;
         }
 
-        var tenant = new Tenant
+        var normalisedMobile = IndianMobileNumber.Normalise(mobile);
+
+        // The seed is refused rather than stored wrong: a number login would later reject
+        // would leave an account nobody can sign into.
+        if (!IndianMobileNumber.IsValid(normalisedMobile))
+        {
+            _logger.LogWarning(
+                "Seed skipped: '{Mobile}' is not a valid 10-digit mobile number.",
+                mobile);
+
+            return;
+        }
+
+        var user = new User
         {
             Id = Guid.CreateVersion7(),
-            Name = tenantName,
-            Code = tenantCode.ToUpperInvariant(),
+            Mobile = normalisedMobile,
+            FullName = fullName,
+            Email = string.IsNullOrWhiteSpace(email) ? null : email.Trim().ToUpperInvariant(),
+            PasswordHash = _passwordHasher.Hash(password),
             IsActive = true
         };
 
-        var admin = new User
-        {
-            Id = Guid.CreateVersion7(),
-            TenantId = tenant.Id,
-            Email = adminEmail.ToUpperInvariant(),
-            FullName = "Administrator",
-            PasswordHash = _passwordHasher.Hash(adminPassword),
-            IsActive = true
-        };
-
-        _context.Tenants.Add(tenant);
-        _context.Users.Add(admin);
+        _context.Users.Add(user);
 
         await _context.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation(
-            "Seeded tenant {TenantCode} with administrator {Email}.",
-            tenant.Code,
-            admin.Email);
+            "Seeded account {UserId} for mobile ending {Last4}. No company is created; " +
+            "sign in and register one.",
+            user.Id,
+            normalisedMobile[^4..]);
     }
 }

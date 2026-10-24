@@ -31,14 +31,15 @@ public enum RefreshTokenRevocationReason
 /// It does NOT derive from SyncableEntity. A credential must never be replicated to a
 /// device, and an offline cache is exactly where it would be forgotten.
 ///
+/// It carries no company: a person signs in once and then chooses which of their
+/// companies to work on, so the session outlives any one company context.
+///
 /// It implements <see cref="INonAuditable"/>, so the token hash is never copied into the
 /// audit trail.
 /// </summary>
 public class RefreshToken : INonAuditable
 {
     public Guid Id { get; set; }
-
-    public Guid TenantId { get; set; }
 
     public Guid UserId { get; set; }
 
@@ -57,6 +58,16 @@ public class RefreshToken : INonAuditable
     /// token be traced to a device, and a single device be signed out.
     /// </summary>
     public string DeviceId { get; set; } = string.Empty;
+
+    /// <summary>
+    /// The company the session was working on when this token was issued, carried through
+    /// every rotation.
+    ///
+    /// Without it, a device that refreshes after being offline would come back signed in
+    /// but with no company selected, and would have to ask the user to pick one again
+    /// before it could upload the work queued against that company.
+    /// </summary>
+    public Guid? ActiveCompanyId { get; set; }
 
     /// <summary>
     /// The login this token descends from. Every rotation keeps the same family, so one

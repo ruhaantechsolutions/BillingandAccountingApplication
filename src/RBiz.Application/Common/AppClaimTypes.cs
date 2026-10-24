@@ -9,6 +9,10 @@ namespace RBiz.Application.Common;
 /// </summary>
 public static class AppClaimTypes
 {
-    /// <summary>Carries the tenant the token was issued for.</summary>
-    public const string TenantId = "tenant_id";
+    /// <summary>
+    /// The company the token is acting on. Absent immediately after sign-in, because a
+    /// person may hold several companies and has not chosen one yet; present once they
+    /// select a company, and replaced when they switch.
+    /// </summary>
+    public const string CompanyId = "company_id";
 }
